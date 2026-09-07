@@ -1,0 +1,11 @@
+question_id,stem_template,n1_min,n1_max,choice_a_template,choice_b_template,choice_c_template,choice_d_template,correct_choice
+q_switch,"If customer switching cost is about {n1} months of revenue, which force usually strengthens?",1,6,Buyer power,Supplier power,Threat of substitutes only,None of the above,A
+q_rival,"When industry growth slows near {n1} percent, rivalry among existing firms typically:",1,5,Intensifies,Disappears,Becomes irrelevant to strategy,Only helps new entrants,A
+q_entry,"A capital requirement near {n1} million most directly raises:",10,90,Barriers to entry,Buyer power,Substitute attractiveness,Complementor influence,A
+q_supplier,"If a key input has only {n1} viable suppliers worldwide, supplier power tends to be:",2,8,Higher,Lower,Unchanged,Illegal to discuss,A
+q_subs,"A substitute that costs about {n1} percent less than the focal product mainly threatens:",10,40,Pricing power of incumbents,HR compliance,Board independence,Warehouse layout,A
+q_diff,"Spending roughly {n1} percent of revenue on distinctive capabilities most supports:",5,20,Differentiation advantage,Commodity price wars only,Tax avoidance,Inventory write-offs,A
+q_cost,"A structural cost advantage of about {n1} percent versus rivals is primarily a:",5,25,Cost leadership source,Marketing slogan,One-time accounting entry,HR benefit,A
+q_scope,"Expanding into {n1} adjacent segments can create scope economies when capabilities transfer:",2,6,Across businesses,Only within one SKU,Never in services,Only after IPO,A
+q_tradeoff,"Choosing a focused position that forgoes about {n1} percent of broad-market demand is often:",10,40,A deliberate strategy tradeoff,Proof of failure,Illegal under competition law,Irrelevant to positioning,A
+q_fit,"When {n1} activity choices reinforce each other, the firm is building:",3,9,Strategic fit,Random experimentation,Pure financial engineering,Supplier dependency only,A

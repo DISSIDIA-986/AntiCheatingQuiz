@@ -1,0 +1,28 @@
+{
+  "name": "anti-cheating-quiz",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:local": "wrangler d1 migrations apply anti-cheating-quiz --local",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "hono": "^4.7.2",
+    "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260907.1",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8",
+    "wrangler": "^4.1.0"
+  }
+}

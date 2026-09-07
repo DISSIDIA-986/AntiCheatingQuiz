@@ -1,0 +1,19 @@
+{
+  "name": "anti-cheating-quiz",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-07",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "anti-cheating-quiz",
+      "database_id": "0ed8addd-1315-420c-95ed-37f576300f6c",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APP_NAME": "AntiCheatingQuiz"
+  }
+}
