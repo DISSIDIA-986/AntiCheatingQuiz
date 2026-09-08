@@ -108,6 +108,15 @@ export function examAppHtml(token: string): string {
     }
     label.check { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.75rem; font-family: "Avenir Next", "Segoe UI", sans-serif; font-size: 0.9rem; }
     label.check input { width: auto; }
+    .print-steps {
+      margin: 0.85rem 0 0;
+      padding-left: 1.25rem;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-size: 0.9rem;
+      line-height: 1.45;
+      color: #2c3a4a;
+    }
+    .print-steps li { margin: 0.35rem 0; }
   </style>
 </head>
 <body>
@@ -119,7 +128,8 @@ export function examAppHtml(token: string): string {
   </header>
   <main>
     <section>
-      <h2>1. Upload &amp; generate</h2>
+      <h2>1. Create &amp; print exam sheets</h2>
+      <p class="sub">This is the paper exam step: the app builds <strong>one PDF per student</strong>. You download a zip, open each PDF (or all of them), and print on Letter paper from your computer.</p>
       <div class="downloads">
         <strong>Download CSV files first (keeps columns correct)</strong>
         <a href="/templates/question-bank-template.csv">Question bank template</a>
@@ -132,7 +142,14 @@ export function examAppHtml(token: string): string {
       <label>Student roster CSV</label>
       <input id="roster" type="file" accept=".csv,text/csv" />
       <label class="check"><input id="forceGen" type="checkbox" /> Replace existing papers (deletes prior grades)</label>
-      <button id="btnGen">Generate ZIP of PDFs</button>
+      <button id="btnGen">Create exam sheets (download ZIP)</button>
+      <ol class="print-steps">
+        <li>Click the button above → a zip file downloads (one PDF per student, named by ID).</li>
+        <li>Unzip the file on your computer.</li>
+        <li>Open a PDF → <strong>File → Print</strong> (or Cmd/Ctrl+P).</li>
+        <li>Paper size: <strong>Letter</strong>, single-sided, actual size (100%, no “fit to page” if you can avoid it).</li>
+        <li>Print every student’s sheet and hand each person <em>their</em> named copy.</li>
+      </ol>
       <div id="genMsg" class="msg"></div>
     </section>
     <section>
@@ -195,7 +212,7 @@ export function examAppHtml(token: string): string {
         a.href = URL.createObjectURL(blob);
         a.download = "exam-sheets.zip";
         a.click();
-        setMsg(msg, "ZIP downloaded. Print Letter, single-sided. Each question has four bubbles (A–D).", true);
+        setMsg(msg, "ZIP downloaded. Unzip → open each PDF → File → Print (Letter, single-sided). Hand each student their named sheet.", true);
         refreshSummary();
       } catch (e) {
         setMsg(msg, String(e.message || e), false);
@@ -518,7 +535,18 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
 <body>
 <main>
   <h1>How to use</h1>
-  <p class="lead">Short guide for running one class exam. No programming needed — upload two spreadsheets, print PDFs, then enter answers.</p>
+  <p class="lead">Short guide for running one class exam. No programming needed — upload two spreadsheets, create printable PDFs, print on paper, then enter answers.</p>
+  <section class="s-create" style="margin-bottom:1rem">
+    <h2>Quick answer — how do I create and print each student’s sheet?</h2>
+    <ul>
+      <li>Upload your <k class="ko">question bank</k> and <k class="ko">student list</k> CSVs.</li>
+      <li>Click <k class="kg">Create exam sheets (download ZIP)</k>.</li>
+      <li>Unzip the download — you get <k class="kg">one PDF per student</k> (name + ID on the page, plus a QR code).</li>
+      <li>Open each PDF on your computer and use <k class="ky">File → Print</k> (Letter, single-sided).</li>
+      <li>Hand each student <k class="kc">their own named sheet</k> in the exam room.</li>
+    </ul>
+    <p class="note">There is no special printer driver. Any normal office/home printer that can print a PDF is fine.</p>
+  </section>
   <p class="legend" aria-label="Colour key">
     <span class="kr">Red = caution</span>
     <span class="ko">Orange = prepare files</span>
@@ -558,13 +586,14 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
   </section>
 
   <section class="s-create">
-    <h2>Step 1 — Create the papers</h2>
+    <h2>Step 1 — Create &amp; print the papers</h2>
     <ul>
       <li>Open the <k class="kr">secret exam link</k> you were sent (bookmark it; do not post it publicly).</li>
-      <li>Under <k class="kg">Upload &amp; generate</k>, choose your question bank, then your student list.</li>
-      <li>Click <k class="kg">Generate ZIP of PDFs</k>.</li>
-      <li>A zip downloads — <k class="kg">one PDF per student</k>.</li>
-      <li>Print on <k class="ky">Letter</k> paper, single-sided. Keep the <k class="kb">QR code</k> visible.</li>
+      <li>Under <k class="kg">Create &amp; print exam sheets</k>, choose your question bank, then your student list.</li>
+      <li>Click <k class="kg">Create exam sheets (download ZIP)</k>.</li>
+      <li>Unzip → open each PDF → <k class="ky">File → Print</k>.</li>
+      <li>Settings: <k class="ky">Letter</k>, single-sided, 100% scale if possible. Keep the <k class="kb">QR code</k> visible and uncut.</li>
+      <li>Print every student’s sheet and hand out the matching named copy in class.</li>
     </ul>
   </section>
 
