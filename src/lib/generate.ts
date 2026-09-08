@@ -21,6 +21,7 @@ export type InstanceQuestion = {
 
 export type ExamInstanceMap = {
   instance_id: string;
+  generation_id: string;
   student_name: string;
   student_id: string;
   /** printed order */
@@ -61,11 +62,18 @@ export function generateInstances(
   questions: BankQuestion[],
   students: RosterStudent[],
   examSeed: string,
+  generationId: string,
+  /** Prefer crypto IDs so force-regen never reuses printed QR codes. */
+  newInstanceId: () => string = cryptoRandomId,
 ): ExamInstanceMap[] {
   if (questions.length !== 10) throw new Error("Need exactly 10 questions");
+  if (!generationId) throw new Error("generationId required");
   return students.map((s, idx) => {
-    const rnd = createRng(`${examSeed}:${s.student_id}:${idx}`);
-    const instance_id = randomId(rnd);
+    // Content seed includes generationId so reshuffles differ per print run.
+    // Instance IDs are NOT derived from this seed — old printed QRs must never
+    // resolve to a new map after regenerate.
+    const rnd = createRng(`${examSeed}:${generationId}:${s.student_id}:${idx}`);
+    const instance_id = newInstanceId();
     const qOrder = shuffle(questions, rnd);
     const mapped: InstanceQuestion[] = qOrder.map((q) => {
       const values = sampleRanges(q.ranges, rnd);
@@ -105,6 +113,7 @@ export function generateInstances(
     });
     return {
       instance_id,
+      generation_id: generationId,
       student_name: s.student_name,
       student_id: s.student_id,
       questions: mapped,
@@ -112,10 +121,20 @@ export function generateInstances(
   });
 }
 
-function randomId(rnd: () => number): string {
+function cryptoRandomId(): string {
   const bytes = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) bytes[i] = Math.floor(rnd() * 256);
+  crypto.getRandomValues(bytes);
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** @deprecated test helper — deterministic ids only for unit tests */
+export function seededInstanceIdFactory(seed: string): () => string {
+  const rnd = createRng(seed);
+  return () => {
+    const bytes = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(rnd() * 256);
+    return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
 }
 
 export function scoreAnswers(

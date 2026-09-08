@@ -18,21 +18,28 @@ function drawFiducial(page: PDFPage, x: number, y: number, size = 12): void {
 function drawQrOnPage(page: PDFPage, text: string, x: number, y: number, size: number): void {
   const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
   const n = qr.modules.size;
-  const cell = size / n;
-  // white background
+  // Quiet zone: 4 modules on each side (QR spec).
+  const quiet = 4;
+  const total = n + quiet * 2;
+  const cell = size / total;
+  const originX = x + quiet * cell;
+  const originY = y + quiet * cell;
+  // Full white pad including quiet zone
   page.drawRectangle({
     x,
     y,
     width: size,
     height: size,
     color: rgb(1, 1, 1),
+    borderColor: rgb(0.75, 0.75, 0.75),
+    borderWidth: 0.5,
   });
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
       if (qr.modules.get(row, col)) {
         page.drawRectangle({
-          x: x + col * cell,
-          y: y + (n - 1 - row) * cell,
+          x: originX + col * cell,
+          y: originY + (n - 1 - row) * cell,
           width: cell,
           height: cell,
           color: rgb(0, 0, 0),
@@ -53,14 +60,18 @@ export async function buildExamPdf(instance: ExamInstanceMap): Promise<Uint8Arra
   drawFiducial(page, MARGIN - 6, MARGIN - 6);
   drawFiducial(page, LETTER.width - MARGIN - 6, MARGIN - 6);
 
-  const qrSize = 58;
-  drawQrOnPage(
-    page,
-    instance.instance_id,
-    LETTER.width - MARGIN - qrSize,
-    LETTER.height - MARGIN - qrSize - 2,
-    qrSize,
-  );
+  const qrSize = 86;
+  const qrX = LETTER.width - MARGIN - qrSize;
+  const qrY = LETTER.height - MARGIN - qrSize - 14;
+  drawQrOnPage(page, instance.instance_id, qrX, qrY, qrSize);
+  // Human-readable fallback if the QR photo fails
+  page.drawText(`ID ${instance.instance_id}`, {
+    x: Math.max(MARGIN, qrX - 4),
+    y: qrY - 10,
+    size: 6,
+    font,
+    color: rgb(0.25, 0.25, 0.25),
+  });
 
   let y = LETTER.height - MARGIN - 8;
   page.drawText("Personalized Exam Sheet", {
@@ -70,14 +81,13 @@ export async function buildExamPdf(instance: ExamInstanceMap): Promise<Uint8Arra
     font: fontBold,
   });
   y -= 14;
-  page.drawText(`Name: ${instance.student_name}    ID: ${instance.student_id}`, {
-    x: MARGIN,
-    y,
-    size: 9,
-    font,
-  });
+  const nameLine = `Name: ${truncate(instance.student_name, 42)}`;
+  const idLine = `Student ID: ${truncate(instance.student_id, 28)}`;
+  page.drawText(nameLine, { x: MARGIN, y, size: 9, font });
   y -= 12;
-  page.drawText("Fill one bubble per question. Hand in this sheet.", {
+  page.drawText(idLine, { x: MARGIN, y, size: 9, font });
+  y -= 12;
+  page.drawText("Fill one bubble per question (A–D). Hand in this sheet.", {
     x: MARGIN,
     y,
     size: 8,
@@ -87,7 +97,7 @@ export async function buildExamPdf(instance: ExamInstanceMap): Promise<Uint8Arra
   y -= 14;
 
   const left = MARGIN;
-  const contentWidth = LETTER.width - MARGIN * 2 - qrSize + 20;
+  const contentWidth = LETTER.width - MARGIN * 2 - qrSize - 8;
 
   for (let i = 0; i < instance.questions.length; i++) {
     const q = instance.questions[i]!;
@@ -139,6 +149,12 @@ function drawBubble(page: PDFPage, x: number, y: number): void {
     borderColor: rgb(0, 0, 0),
     borderWidth: 0.8,
   });
+}
+
+function truncate(s: string, max: number): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, Math.max(0, max - 1))}…`;
 }
 
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {

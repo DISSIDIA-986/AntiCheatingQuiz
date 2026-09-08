@@ -14,6 +14,7 @@ describe("pdf generation", () => {
       bank.questions,
       [{ student_name: "Alex Rivera", student_id: "S1001" }],
       "pdf-seed",
+      "gen-1",
     );
     expect(instances[0]!.questions).toHaveLength(10);
     expect(instances[0]!.questions.length * 4).toBe(40);
@@ -27,7 +28,7 @@ describe("pdf generation", () => {
     const roster = validateRosterCsv(readFileSync(resolve("samples/students.csv"), "utf8"));
     expect(bank.ok && roster.ok).toBe(true);
     if (!bank.ok || !roster.ok) return;
-    const instances = generateInstances(bank.questions, roster.students, "pdf-all");
+    const instances = generateInstances(bank.questions, roster.students, "pdf-all", "gen-pdf-all");
     for (const inst of instances) {
       const pdf = await buildExamPdf(inst);
       expect(pdf.byteLength).toBeGreaterThan(1000);

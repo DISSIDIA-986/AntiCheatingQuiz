@@ -158,7 +158,7 @@ e.post("/api/generate", async (c) => {
       {
         error: "already_generated",
         message:
-          "Papers already exist for this exam. Regenerating will delete existing PDFs and grades. Pass force=true after confirming, or create a new exam link.",
+          "Papers already exist for this exam. Regenerating deletes grades and creates NEW QR codes — already-printed sheets will no longer match. Pass force=true only after confirming, or create a new exam link.",
         instances: existing?.n ?? 0,
       },
       409,
@@ -170,9 +170,10 @@ e.post("/api/generate", async (c) => {
   const roster = validateRosterCsv(body.rosterCsv ?? "");
   if (!roster.ok) return c.json({ error: "roster_invalid", issues: roster.issues }, 400);
 
+  const generationId = randomToken();
   let instances: ExamInstanceMap[];
   try {
-    instances = generateInstances(bank.questions, roster.students, exam.id);
+    instances = generateInstances(bank.questions, roster.students, exam.id, generationId);
   } catch (err) {
     return c.json({ error: "generate_failed", message: err instanceof Error ? err.message : String(err) }, 400);
   }
@@ -203,7 +204,11 @@ e.post("/api/generate", async (c) => {
       `INSERT INTO exam_payloads (exam_id, bank_json, roster_json, generated_at)
        VALUES (?, ?, ?, datetime('now'))
        ON CONFLICT(exam_id) DO UPDATE SET bank_json=excluded.bank_json, roster_json=excluded.roster_json, generated_at=excluded.generated_at`,
-    ).bind(exam.id, JSON.stringify(bank.questions), JSON.stringify(roster.students)),
+    ).bind(
+      exam.id,
+      JSON.stringify({ generation_id: generationId, questions: bank.questions }),
+      JSON.stringify(roster.students),
+    ),
   ];
   await c.env.DB.batch(stmts);
 
@@ -353,8 +358,11 @@ e.get("/api/results.csv", async (c) => {
     .first<{ bank_json: string }>();
   let headersQ = qids;
   if (payload) {
-    const bank = JSON.parse(payload.bank_json) as Array<{ question_id: string }>;
-    headersQ = bank.map((b) => b.question_id);
+    const raw = JSON.parse(payload.bank_json) as
+      | Array<{ question_id: string }>
+      | { questions: Array<{ question_id: string }> };
+    const bank = Array.isArray(raw) ? raw : raw.questions;
+    if (bank?.length) headersQ = bank.map((b) => b.question_id);
   }
 
   const headers = [

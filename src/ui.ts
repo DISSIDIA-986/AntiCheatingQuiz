@@ -191,7 +191,13 @@ export function examAppHtml(token: string): string {
       try {
         const bank = await readFile(document.getElementById("bank"));
         const roster = await readFile(document.getElementById("roster"));
-        const force = document.getElementById("forceGen").checked;
+        let force = document.getElementById("forceGen").checked;
+        if (force) {
+          const ok = window.confirm(
+            "Replace existing papers?\\n\\nThis DELETES current grades and creates NEW QR codes.\\nAlready-printed sheets will NOT match the new files.\\n\\nOK = replace, Cancel = abort",
+          );
+          if (!ok) return;
+        }
         const res = await fetch(base + "/api/generate", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -201,7 +207,8 @@ export function examAppHtml(token: string): string {
           const err = await res.json().catch(async () => ({ error: await res.text() }));
           if (res.status === 409 && err.error === "already_generated") {
             throw new Error(
-              "Papers already exist. Tick “Replace existing papers” only if you really want to delete grades, then try again.\\n\\n" +
+              "Papers already exist. Tick “Replace existing papers”, confirm the warning, then try again.\\n\\n" +
+                "Warning: regenerated sheets get NEW QR codes — old printouts will not grade.\\n\\n" +
                 JSON.stringify(err, null, 2),
             );
           }
@@ -592,8 +599,9 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
       <li>Under <k class="kg">Create &amp; print exam sheets</k>, choose your question bank, then your student list.</li>
       <li>Click <k class="kg">Create exam sheets (download ZIP)</k>.</li>
       <li>Unzip → open each PDF → <k class="ky">File → Print</k>.</li>
-      <li>Settings: <k class="ky">Letter</k>, single-sided, 100% scale if possible. Keep the <k class="kb">QR code</k> visible and uncut.</li>
+      <li>Settings: <k class="ky">Letter</k>, single-sided, 100% scale if possible. Keep the large <k class="kb">QR code</k> and the printed ID under it uncut.</li>
       <li>Print every student’s sheet and hand out the matching named copy in class.</li>
+      <li><k class="kr">Do not regenerate</k> after printing unless you plan to reprint everything — new files get new QR codes.</li>
     </ul>
   </section>
 

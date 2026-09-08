@@ -252,6 +252,14 @@ export function validateRosterCsv(text: string): { ok: true; students: RosterStu
       issues.push({ row: rowNum, message: "student_name and student_id required" });
       return;
     }
+    if (student_name.length > 80) {
+      issues.push({ row: rowNum, message: "student_name max 80 characters" });
+      return;
+    }
+    if (student_id.length > 40) {
+      issues.push({ row: rowNum, message: "student_id max 40 characters" });
+      return;
+    }
     if (ids.has(student_id)) {
       issues.push({ row: rowNum, message: `Duplicate student_id: ${student_id}` });
       return;

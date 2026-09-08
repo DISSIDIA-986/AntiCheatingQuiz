@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateBankCsv, validateRosterCsv, renderQuestion } from "../src/lib/bank";
-import { createRng, generateInstances, scoreAnswers } from "../src/lib/generate";
+import { createRng, generateInstances, scoreAnswers, seededInstanceIdFactory } from "../src/lib/generate";
 import { parseCsv, toCsv } from "../src/lib/csv";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -58,15 +58,24 @@ describe("generate + score", () => {
     const roster = validateRosterCsv(readFileSync(rosterPath, "utf8"));
     expect(bank.ok && roster.ok).toBe(true);
     if (!bank.ok || !roster.ok) return;
-    const instances = generateInstances(bank.questions, roster.students, "exam-seed");
+    const idFactory = seededInstanceIdFactory("fixed-ids");
+    const instances = generateInstances(bank.questions, roster.students, "exam-seed", "gen-a", idFactory);
     expect(instances).toHaveLength(5);
     expect(new Set(instances.map((i) => i.instance_id)).size).toBe(5);
+    expect(instances.every((i) => i.generation_id === "gen-a")).toBe(true);
 
     const a = instances[0]!;
     const b = instances[1]!;
     // same question ids set
     expect(new Set(a.questions.map((q) => q.question_id))).toEqual(
       new Set(b.questions.map((q) => q.question_id)),
+    );
+
+    // force-regen with new generation id must not reuse QR/instance ids
+    const idFactory2 = seededInstanceIdFactory("fixed-ids-2");
+    const regen = generateInstances(bank.questions, roster.students, "exam-seed", "gen-b", idFactory2);
+    expect(new Set(regen.map((i) => i.instance_id))).not.toEqual(
+      new Set(instances.map((i) => i.instance_id)),
     );
 
     // perfect score via canonical mapping
