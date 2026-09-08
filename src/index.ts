@@ -6,7 +6,8 @@ import { buildExamPdf } from "./lib/pdf";
 import { safeFilename, zipPdfs } from "./lib/zip";
 import { toCsv } from "./lib/csv";
 import { getTemplate, csvDownloadResponse } from "./lib/templates";
-import { examAppHtml, homeHtml, helpHtml } from "./ui";
+import { extractSheetLookup, randomSheetCode, sheetGradePath } from "./lib/sheet-code";
+import { examAppHtml, homeHtml, helpHtml, sheetGradeHtml } from "./ui";
 
 export type Env = {
   DB: D1Database;
@@ -171,18 +172,33 @@ e.post("/api/generate", async (c) => {
   if (!roster.ok) return c.json({ error: "roster_invalid", issues: roster.issues }, 400);
 
   const generationId = randomToken();
+  let sheetCodes: string[];
+  try {
+    sheetCodes = await mintUniqueSheetCodes(c.env.DB, roster.students.length);
+  } catch (err) {
+    return c.json({ error: "generate_failed", message: err instanceof Error ? err.message : String(err) }, 500);
+  }
+  let codeIdx = 0;
   let instances: ExamInstanceMap[];
   try {
-    instances = generateInstances(bank.questions, roster.students, exam.id, generationId);
+    instances = generateInstances(
+      bank.questions,
+      roster.students,
+      exam.id,
+      generationId,
+      () => sheetCodes[codeIdx++]!,
+    );
   } catch (err) {
     return c.json({ error: "generate_failed", message: err instanceof Error ? err.message : String(err) }, 400);
   }
 
+  const origin = new URL(c.req.url).origin;
   // Build ALL PDFs before touching existing exam rows (atomic replace).
   const files: Array<{ name: string; bytes: Uint8Array }> = [];
   for (const inst of instances) {
     try {
-      const pdf = await buildExamPdf(inst);
+      const gradeUrl = `${origin}${sheetGradePath(inst.instance_id)}`;
+      const pdf = await buildExamPdf(inst, { gradeUrl });
       files.push({ name: safeFilename(inst.student_name, inst.student_id), bytes: pdf });
     } catch (err) {
       return c.json(
@@ -195,6 +211,11 @@ e.post("/api/generate", async (c) => {
   const stmts = [
     c.env.DB.prepare("DELETE FROM grades WHERE exam_id = ?").bind(exam.id),
     c.env.DB.prepare("DELETE FROM instances WHERE exam_id = ?").bind(exam.id),
+    ...instances.map((inst) =>
+      c.env.DB.prepare(
+        "INSERT INTO issued_instance_ids (instance_id) VALUES (?)",
+      ).bind(inst.instance_id),
+    ),
     ...instances.map((inst) =>
       c.env.DB.prepare(
         "INSERT INTO instances (id, exam_id, student_name, student_id, map_json) VALUES (?, ?, ?, ?, ?)",
@@ -225,88 +246,26 @@ e.post("/api/generate", async (c) => {
 
 e.get("/api/instances/:id", async (c) => {
   const exam = c.get("exam");
-  const id = c.req.param("id");
-  const row = await c.env.DB
-    .prepare("SELECT map_json FROM instances WHERE id = ? AND exam_id = ?")
-    .bind(id, exam.id)
-    .first<{ map_json: string }>();
-  if (!row) return c.json({ error: "not found" }, 404);
-  const map = JSON.parse(row.map_json) as ExamInstanceMap;
-  const grade = await c.env.DB
-    .prepare(
-      "SELECT answers_json, score_correct, score_pct, status FROM grades WHERE instance_id = ? AND exam_id = ?",
-    )
-    .bind(id, exam.id)
-    .first<{ answers_json: string; score_correct: number; score_pct: number; status: string }>();
-
-  let saved_answers: Record<string, Letter | ""> | null = null;
-  if (grade) {
-    const canonical = JSON.parse(grade.answers_json) as Record<string, string>;
-    saved_answers = canonicalToPrintedAnswers(map, canonical);
-  }
-
-  return c.json({
-    instance_id: map.instance_id,
-    student_name: map.student_name,
-    student_id: map.student_id,
-    questions: map.questions.map((q) => ({
-      question_id: q.question_id,
-      stem: q.stem,
-      choices: q.choices,
-    })),
-    grade: grade
-      ? {
-          saved_answers,
-          score_correct: grade.score_correct,
-          score_pct: grade.score_pct,
-          status: grade.status,
-        }
-      : null,
-  });
+  const id = extractSheetLookup(c.req.param("id"));
+  const payload = await loadGradePayload(c.env.DB, id, exam.id);
+  if (!payload) return c.json({ error: "not found" }, 404);
+  return c.json(payload);
 });
 
 e.post("/api/instances/:id/grade", async (c) => {
   const exam = c.get("exam");
-  const id = c.req.param("id");
+  const id = extractSheetLookup(c.req.param("id"));
   let body: { answers: Record<string, string>; status?: string };
   try {
     body = await readJsonLimited(c);
   } catch (err) {
     return c.json({ error: "bad_request", message: err instanceof Error ? err.message : String(err) }, 400);
   }
-  const row = await c.env.DB
-    .prepare("SELECT map_json FROM instances WHERE id = ? AND exam_id = ?")
-    .bind(id, exam.id)
-    .first<{ map_json: string }>();
-  if (!row) return c.json({ error: "not found" }, 404);
-  const map = JSON.parse(row.map_json) as ExamInstanceMap;
-  const answers: Record<string, Letter | ""> = {};
-  for (const [k, v] of Object.entries(body.answers ?? {})) {
-    const up = String(v).toUpperCase();
-    answers[k] = up === "A" || up === "B" || up === "C" || up === "D" ? up : "";
+  const result = await saveGrade(c.env.DB, id, exam.id, body);
+  if (!result.ok) {
+    return c.json({ error: result.error, ...(result.extra ?? {}) }, result.status);
   }
-  const scored = scoreAnswers(map, answers);
-  const status = body.status ?? "ok";
-  if (!ALLOWED_STATUS.has(status)) {
-    return c.json({ error: "invalid_status", allowed: [...ALLOWED_STATUS] }, 400);
-  }
-  await c.env.DB.prepare(
-    `INSERT INTO grades (instance_id, exam_id, answers_json, score_correct, score_pct, status, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-     ON CONFLICT(instance_id) DO UPDATE SET
-       answers_json=excluded.answers_json,
-       score_correct=excluded.score_correct,
-       score_pct=excluded.score_pct,
-       status=excluded.status,
-       updated_at=excluded.updated_at`,
-  )
-    .bind(id, exam.id, JSON.stringify(scored.canonical), scored.score_correct, scored.score_pct, status)
-    .run();
-  return c.json({
-    score_correct: scored.score_correct,
-    score_pct: scored.score_pct,
-    status,
-  });
+  return c.json(result.body);
 });
 
 e.get("/api/summary", async (c) => {
@@ -403,5 +362,172 @@ e.post("/api/revoke", async (c) => {
 });
 
 app.route("/e/:token", e);
+
+/** Phone-friendly single-sheet grading — QR opens this page (no exam secret needed). */
+app.get("/s/:code", async (c) => {
+  const code = extractSheetLookup(c.req.param("code"));
+  const row = await c.env.DB
+    .prepare("SELECT id FROM instances WHERE id = ?")
+    .bind(code)
+    .first<{ id: string }>();
+  if (!row) {
+    const res = c.html(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sheet not found</title></head><body style="font-family:system-ui;padding:1.5rem;max-width:28rem"><h1>Sheet not found</h1><p>This QR may be from an old printout that was regenerated, or the code was mistyped.</p></body></html>`,
+      404,
+    );
+    securityHeaders(res, true);
+    return res;
+  }
+  const res = c.html(sheetGradeHtml(row.id));
+  securityHeaders(res, true);
+  return res;
+});
+
+app.get("/s/:code/api", async (c) => {
+  const code = extractSheetLookup(c.req.param("code"));
+  const payload = await loadGradePayload(c.env.DB, code);
+  if (!payload) return c.json({ error: "not found" }, 404);
+  const res = c.json(payload);
+  securityHeaders(res, true);
+  return res;
+});
+
+app.post("/s/:code/api/grade", async (c) => {
+  const code = extractSheetLookup(c.req.param("code"));
+  let body: { answers: Record<string, string>; status?: string };
+  try {
+    body = await readJsonLimited(c);
+  } catch (err) {
+    return c.json({ error: "bad_request", message: err instanceof Error ? err.message : String(err) }, 400);
+  }
+  const row = await c.env.DB
+    .prepare("SELECT id, exam_id FROM instances WHERE id = ?")
+    .bind(code)
+    .first<{ id: string; exam_id: string }>();
+  if (!row) return c.json({ error: "not found" }, 404);
+  const result = await saveGrade(c.env.DB, row.id, row.exam_id, body);
+  if (!result.ok) {
+    return c.json({ error: result.error, ...(result.extra ?? {}) }, result.status);
+  }
+  const res = c.json(result.body);
+  securityHeaders(res, true);
+  return res;
+});
+
+async function mintUniqueSheetCodes(db: D1Database, count: number): Promise<string[]> {
+  const codes: string[] = [];
+  const used = new Set<string>();
+  let attempts = 0;
+  const maxAttempts = count * 40 + 40;
+  while (codes.length < count && attempts < maxAttempts) {
+    attempts++;
+    const id = randomSheetCode();
+    if (used.has(id)) continue;
+    const exists = await db
+      .prepare("SELECT 1 AS n FROM issued_instance_ids WHERE instance_id = ?")
+      .bind(id)
+      .first();
+    if (exists) continue;
+    used.add(id);
+    codes.push(id);
+  }
+  if (codes.length < count) {
+    throw new Error("Could not allocate unique sheet codes");
+  }
+  return codes;
+}
+
+async function loadGradePayload(db: D1Database, id: string, examId?: string) {
+  const row = examId
+    ? await db
+        .prepare("SELECT map_json, exam_id FROM instances WHERE id = ? AND exam_id = ?")
+        .bind(id, examId)
+        .first<{ map_json: string; exam_id: string }>()
+    : await db
+        .prepare("SELECT map_json, exam_id FROM instances WHERE id = ?")
+        .bind(id)
+        .first<{ map_json: string; exam_id: string }>();
+  if (!row) return null;
+  const map = JSON.parse(row.map_json) as ExamInstanceMap;
+  const grade = await db
+    .prepare(
+      "SELECT answers_json, score_correct, score_pct, status FROM grades WHERE instance_id = ? AND exam_id = ?",
+    )
+    .bind(id, row.exam_id)
+    .first<{ answers_json: string; score_correct: number; score_pct: number; status: string }>();
+
+  let saved_answers: Record<string, Letter | ""> | null = null;
+  if (grade) {
+    const canonical = JSON.parse(grade.answers_json) as Record<string, string>;
+    saved_answers = canonicalToPrintedAnswers(map, canonical);
+  }
+
+  return {
+    instance_id: map.instance_id,
+    student_name: map.student_name,
+    student_id: map.student_id,
+    questions: map.questions.map((q) => ({
+      question_id: q.question_id,
+      stem: q.stem,
+      choices: q.choices,
+    })),
+    grade: grade
+      ? {
+          saved_answers,
+          score_correct: grade.score_correct,
+          score_pct: grade.score_pct,
+          status: grade.status,
+        }
+      : null,
+  };
+}
+
+async function saveGrade(
+  db: D1Database,
+  id: string,
+  examId: string,
+  body: { answers: Record<string, string>; status?: string },
+): Promise<
+  | { ok: true; body: { score_correct: number; score_pct: number; status: string } }
+  | { ok: false; error: string; status: 400 | 404; extra?: Record<string, unknown> }
+> {
+  const row = await db
+    .prepare("SELECT map_json FROM instances WHERE id = ? AND exam_id = ?")
+    .bind(id, examId)
+    .first<{ map_json: string }>();
+  if (!row) return { ok: false, error: "not found", status: 404 };
+  const map = JSON.parse(row.map_json) as ExamInstanceMap;
+  const answers: Record<string, Letter | ""> = {};
+  for (const [k, v] of Object.entries(body.answers ?? {})) {
+    const up = String(v).toUpperCase();
+    answers[k] = up === "A" || up === "B" || up === "C" || up === "D" ? up : "";
+  }
+  const scored = scoreAnswers(map, answers);
+  const status = body.status ?? "ok";
+  if (!ALLOWED_STATUS.has(status)) {
+    return { ok: false, error: "invalid_status", status: 400, extra: { allowed: [...ALLOWED_STATUS] } };
+  }
+  await db
+    .prepare(
+      `INSERT INTO grades (instance_id, exam_id, answers_json, score_correct, score_pct, status, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(instance_id) DO UPDATE SET
+         answers_json=excluded.answers_json,
+         score_correct=excluded.score_correct,
+         score_pct=excluded.score_pct,
+         status=excluded.status,
+         updated_at=excluded.updated_at`,
+    )
+    .bind(id, examId, JSON.stringify(scored.canonical), scored.score_correct, scored.score_pct, status)
+    .run();
+  return {
+    ok: true,
+    body: {
+      score_correct: scored.score_correct,
+      score_pct: scored.score_pct,
+      status,
+    },
+  };
+}
 
 export default app;

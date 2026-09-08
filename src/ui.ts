@@ -122,7 +122,7 @@ export function examAppHtml(token: string): string {
 <body>
   <header>
     <h1>AntiCheatingQuiz</h1>
-    <p class="sub">Create personalized paper exams, print them, then grade with your phone. Prototype — not a Scantron replacement.</p>
+    <p class="sub">Create personalized paper exams on your computer, print them, then <strong>scan each sheet’s QR with your phone</strong> to grade. Prototype — not a Scantron replacement.</p>
     <p class="warn-banner"><strong>Privacy:</strong> Anyone with this secret link can view student names/IDs, change grades, and download results. Use sample/fake data unless you accept that risk. Do not post the link publicly.</p>
     <p class="nav"><a href="/e/${token}/help">How to use (Help)</a></p>
   </header>
@@ -153,14 +153,15 @@ export function examAppHtml(token: string): string {
       <div id="genMsg" class="msg"></div>
     </section>
     <section>
-      <h2>2. Grade (QR + manual)</h2>
-      <p class="sub">Upload a photo of a sheet. The browser reads the QR locally; you confirm answers. Auto ink-reading is not required for this prototype.</p>
-      <label>Sheet photo</label>
+      <h2>2. Grade on your phone</h2>
+      <p class="sub"><strong>Normal path:</strong> open the iPhone Camera (or any QR app), point at the sheet’s QR → Safari opens a grading page for that student → tap the bubbles you see on paper → Save. No copy/paste needed.</p>
+      <p class="sub">Use the tools below only if the camera link fails (fallback on this computer).</p>
+      <label>Sheet photo (optional fallback)</label>
       <input id="photo" type="file" accept="image/*" capture="environment" />
       <button id="btnDecode" class="secondary">Read QR from photo</button>
-      <label>Or paste instance id from QR</label>
-      <input id="instanceId" type="text" placeholder="32-char hex from QR" />
-      <button id="btnLoad">Load instance</button>
+      <label>Or type/paste sheet code</label>
+      <input id="instanceId" type="text" placeholder="e.g. 7K4M-2Q8R-XP6T" autocomplete="off" />
+      <button id="btnLoad">Load sheet</button>
       <div id="gradeBox"></div>
       <div id="gradeMsg" class="msg"></div>
     </section>
@@ -226,10 +227,17 @@ export function examAppHtml(token: string): string {
       }
     };
 
-    async function loadInstance(id) {
+    async function loadInstance(raw) {
       const msg = document.getElementById("gradeMsg");
       const box = document.getElementById("gradeBox");
       box.innerHTML = "";
+      const id = extractLookup(raw);
+      if (!id) throw new Error("Enter a sheet code");
+      // If QR decoded to a grade URL, jump there (same as phone camera).
+      if (/^https?:\\/\\//i.test(String(raw).trim()) && /\\/s\\//i.test(String(raw))) {
+        location.href = String(raw).trim();
+        return;
+      }
       const res = await fetch(base + "/api/instances/" + encodeURIComponent(id));
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -303,13 +311,20 @@ export function examAppHtml(token: string): string {
         }
       };
       box.appendChild(save);
-      setMsg(msg, data.grade ? "Instance loaded with prior answers. Edit and save." : "Instance loaded. Select bubbles and save.", true);
+      setMsg(msg, data.grade ? "Sheet loaded with prior answers. Edit and save." : "Sheet loaded. Select bubbles and save.", true);
+    }
+
+    function extractLookup(raw) {
+      const t = String(raw || "").trim();
+      const m = t.match(/\\/s\\/([0-9A-Za-z-]{8,48})/i);
+      if (m) return m[1].toUpperCase().replace(/[^0-9A-Z]/g, "");
+      return t.toUpperCase().replace(/[^0-9A-Z]/g, "") || t;
     }
 
     document.getElementById("btnLoad").onclick = async () => {
       try {
         const id = document.getElementById("instanceId").value.trim();
-        if (!id) throw new Error("Enter instance id");
+        if (!id) throw new Error("Enter sheet code");
         await loadInstance(id);
       } catch (e) {
         setMsg(document.getElementById("gradeMsg"), String(e.message || e), false);
@@ -329,7 +344,7 @@ export function examAppHtml(token: string): string {
           if (codes[0] && codes[0].rawValue) data = codes[0].rawValue.trim();
         }
         if (!data) {
-          throw new Error("Could not read QR in-browser (try Chrome/Edge, better light, or paste the instance id from any QR app).");
+          throw new Error("Could not read QR here. On iPhone: open Camera, scan the QR — it opens the grade page directly.");
         }
         document.getElementById("instanceId").value = data;
         await loadInstance(data);
@@ -373,6 +388,194 @@ export function examAppHtml(token: string): string {
         .replace(/'/g, "&#39;");
     }
     refreshSummary();
+  </script>
+</body>
+</html>`;
+}
+
+/** Phone-first grading page opened by scanning the sheet QR. */
+export function sheetGradeHtml(code: string): string {
+  const c = JSON.stringify(code);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <title>Grade sheet</title>
+  <style>
+    :root {
+      --bg: #f3efe6;
+      --ink: #1c2430;
+      --accent: #0f5c4c;
+      --card: #fffdf8;
+      --line: #d5cbb8;
+      --warn: #8a3b12;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #f7f2e8 0%, var(--bg) 100%);
+      min-height: 100vh;
+      padding: 1rem 1rem 3rem;
+    }
+    header { max-width: 40rem; margin: 0 auto 1rem; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.35rem; color: var(--accent); }
+    .sub { opacity: 0.85; line-height: 1.4; font-size: 0.95rem; }
+    #meta { font-size: 1.05rem; margin: 0.5rem 0 1rem; }
+    .q {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 0.85rem 0.9rem;
+      margin: 0 0 0.75rem;
+    }
+    .q .stem { font-family: "Source Serif 4", Palatino, serif; margin-bottom: 0.55rem; line-height: 1.35; }
+    .opt {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55rem;
+      padding: 0.55rem 0.45rem;
+      border-radius: 6px;
+      margin: 0.2rem 0;
+      border: 1px solid transparent;
+    }
+    .opt:has(input:checked) {
+      background: #e7f3ee;
+      border-color: #9bc4b4;
+    }
+    .opt input { width: 1.15rem; height: 1.15rem; margin-top: 0.1rem; flex-shrink: 0; }
+    .opt span { line-height: 1.35; font-size: 0.95rem; }
+    .actions {
+      position: sticky;
+      bottom: 0;
+      background: rgba(243,239,230,0.96);
+      padding: 0.75rem 0 0.25rem;
+      max-width: 40rem;
+      margin: 0 auto;
+      border-top: 1px solid var(--line);
+    }
+    button {
+      width: 100%;
+      background: var(--accent);
+      color: #f7fff9;
+      border: 0;
+      padding: 0.9rem 1rem;
+      font: 700 1.05rem/1 "Avenir Next", "Segoe UI", sans-serif;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    label.check { display: flex; gap: 0.5rem; align-items: flex-start; margin: 0.65rem 0; font-size: 0.92rem; }
+    .msg { margin-top: 0.65rem; white-space: pre-wrap; font-size: 0.9rem; }
+    .err { color: var(--warn); }
+    .ok { color: var(--accent); }
+    #root { max-width: 40rem; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Grade this sheet</h1>
+    <p class="sub">Look at the paper. Tap the same A–D answers the student bubbled. Then save.</p>
+  </header>
+  <div id="root">
+    <div id="meta">Loading…</div>
+    <div id="qs"></div>
+    <div class="actions">
+      <label class="check"><input id="confirmChecked" type="checkbox" /> I checked this against the paper</label>
+      <button id="btnSave" disabled>Save grade</button>
+      <div id="msg" class="msg"></div>
+    </div>
+  </div>
+  <script>
+    const CODE = ${c};
+    const api = location.origin + "/s/" + encodeURIComponent(CODE) + "/api";
+    let data = null;
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function setMsg(text, ok) {
+      const el = document.getElementById("msg");
+      el.textContent = text;
+      el.className = "msg " + (ok ? "ok" : "err");
+    }
+
+    async function boot() {
+      const res = await fetch(api);
+      if (!res.ok) throw new Error("Could not load this sheet.");
+      data = await res.json();
+      document.getElementById("meta").innerHTML =
+        "<strong>" + escapeHtml(data.student_name) + "</strong><br/>ID " + escapeHtml(data.student_id) +
+        (data.grade ? "<br/>Previous score: " + data.grade.score_correct + "/10" : "");
+      const box = document.getElementById("qs");
+      const saved = (data.grade && data.grade.saved_answers) || {};
+      data.questions.forEach((q, i) => {
+        const div = document.createElement("div");
+        div.className = "q";
+        div.innerHTML = '<div class="stem"><strong>' + (i + 1) + ".</strong> " + escapeHtml(q.stem) + "</div>";
+        const current = saved[q.question_id] ?? "";
+        ["A","B","C","D",""].forEach((L) => {
+          const lab = document.createElement("label");
+          lab.className = "opt";
+          const inp = document.createElement("input");
+          inp.type = "radio";
+          inp.name = "q_" + q.question_id;
+          inp.value = L;
+          inp.dataset.qid = q.question_id;
+          if (L === current) inp.checked = true;
+          const span = document.createElement("span");
+          span.textContent = L === "" ? "Blank / no bubble" : L + ") " + q.choices[L];
+          lab.appendChild(inp);
+          lab.appendChild(span);
+          div.appendChild(lab);
+        });
+        box.appendChild(div);
+      });
+      document.getElementById("btnSave").disabled = false;
+    }
+
+    document.getElementById("btnSave").onclick = async () => {
+      try {
+        if (!document.getElementById("confirmChecked").checked) {
+          throw new Error("Tick “I checked this against the paper” first.");
+        }
+        const answers = {};
+        let blank = 0;
+        data.questions.forEach((q) => {
+          const sel = document.querySelector('input[data-qid="' + CSS.escape(q.question_id) + '"]:checked');
+          const v = sel ? sel.value : "";
+          answers[q.question_id] = v;
+          if (!v) blank++;
+        });
+        let status = "ok";
+        if (blank > 0) {
+          const proceed = window.confirm(
+            blank + " blank answer(s) will score as wrong. Save as needs review?\\n\\nOK = save, Cancel = go back",
+          );
+          if (!proceed) return;
+          status = "needs_review";
+        }
+        const r = await fetch(api + "/grade", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ answers, status }),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const out = await r.json();
+        setMsg("Saved. Score " + out.score_correct + "/10 (" + out.score_pct + "%). You can close this tab and scan the next sheet.", true);
+      } catch (e) {
+        setMsg(String(e.message || e), false);
+      }
+    };
+
+    boot().catch((e) => setMsg(String(e.message || e), false));
   </script>
 </body>
 </html>`;
@@ -599,7 +802,7 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
       <li>Under <k class="kg">Create &amp; print exam sheets</k>, choose your question bank, then your student list.</li>
       <li>Click <k class="kg">Create exam sheets (download ZIP)</k>.</li>
       <li>Unzip → open each PDF → <k class="ky">File → Print</k>.</li>
-      <li>Settings: <k class="ky">Letter</k>, single-sided, 100% scale if possible. Keep the large <k class="kb">QR code</k> and the printed ID under it uncut.</li>
+      <li>Settings: <k class="ky">Letter</k>, single-sided, 100% scale if possible. Keep the large <k class="kb">QR code</k> (and the short code under it) uncut.</li>
       <li>Print every student’s sheet and hand out the matching named copy in class.</li>
       <li><k class="kr">Do not regenerate</k> after printing unless you plan to reprint everything — new files get new QR codes.</li>
     </ul>
@@ -615,14 +818,13 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
   </section>
 
   <section class="s-grade">
-    <h2>Step 3 — Grade</h2>
+    <h2>Step 3 — Grade (phone)</h2>
     <ul>
-      <li>On the same web page, go to <k class="kb">Grade</k>.</li>
-      <li><k class="kb">Easiest:</k> scan the sheet’s <k class="kb">QR code</k> with any phone QR app, paste into <k class="kb">Or paste instance id</k>, then <k class="kb">Load instance</k>.</li>
-      <li>On some phones (Chrome/Edge), upload a photo and click <k class="kb">Read QR from photo</k>.</li>
-      <li>Tap the answers they bubbled (or leave blank).</li>
-      <li>Click <k class="kb">Save grade</k>. Repeat for each sheet.</li>
-      <li>If you reopen a student, previous answers stay — fix one question without wiping the rest.</li>
+      <li><k class="kb">Easiest:</k> open the <k class="kb">iPhone Camera</k> (or any QR app) and point at the sheet’s <k class="kb">QR code</k>.</li>
+      <li>A link opens in Safari — that page is <k class="kb">only for that student</k>.</li>
+      <li>Tap the answers you see bubbled on the paper → tick “I checked…” → <k class="kb">Save grade</k>.</li>
+      <li>Close the tab and scan the next sheet. Repeat until done.</li>
+      <li>Fallback (if camera fails): on your computer exam page, type the short code printed under the QR (like <code>7K4M-2Q8R-XP6T</code>).</li>
     </ul>
   </section>
 
@@ -641,7 +843,7 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
       <li><k class="kr">“Bank invalid”</k> — need exactly 10 questions; column names must match the sample.</li>
       <li><k class="kr">“Roster invalid”</k> — every row needs a name and a unique student ID; max about 50 students.</li>
       <li><k class="kr">“Shorten question text”</k> — too long for one page; shorten and generate again.</li>
-      <li><k class="kr">QR not reading</k> — better light, or paste the code from any QR scanner app.</li>
+      <li><k class="kr">QR not opening a page</k> — the QR must be from a newly generated ZIP (old prints only had a long ID). Reprint after updating, or type the short code under the QR.</li>
       <li><k class="kr">Lost the secret link</k> — ask your helper for a new link; do not share the old one widely.</li>
     </ul>
   </section>

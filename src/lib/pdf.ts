@@ -1,19 +1,10 @@
 import { PDFDocument, StandardFonts, rgb, type PDFPage, type PDFFont } from "pdf-lib";
 import QRCode from "qrcode";
 import type { ExamInstanceMap } from "./generate";
+import { formatSheetCode } from "./sheet-code";
 
 const LETTER = { width: 612, height: 792 };
 const MARGIN = 28;
-
-function drawFiducial(page: PDFPage, x: number, y: number, size = 12): void {
-  page.drawRectangle({
-    x,
-    y,
-    width: size,
-    height: size,
-    color: rgb(0, 0, 0),
-  });
-}
 
 function drawQrOnPage(page: PDFPage, text: string, x: number, y: number, size: number): void {
   const qr = QRCode.create(text, { errorCorrectionLevel: "M" });
@@ -24,7 +15,6 @@ function drawQrOnPage(page: PDFPage, text: string, x: number, y: number, size: n
   const cell = size / total;
   const originX = x + quiet * cell;
   const originY = y + quiet * cell;
-  // Full white pad including quiet zone
   page.drawRectangle({
     x,
     y,
@@ -49,28 +39,39 @@ function drawQrOnPage(page: PDFPage, text: string, x: number, y: number, size: n
   }
 }
 
-export async function buildExamPdf(instance: ExamInstanceMap): Promise<Uint8Array> {
+export type BuildPdfOptions = {
+  /** Absolute URL opened by phone camera (e.g. https://host/s/CODE). */
+  gradeUrl: string;
+};
+
+export async function buildExamPdf(
+  instance: ExamInstanceMap,
+  opts: BuildPdfOptions,
+): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([LETTER.width, LETTER.height]);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
 
-  drawFiducial(page, MARGIN - 6, LETTER.height - MARGIN - 4);
-  drawFiducial(page, LETTER.width - MARGIN - 6, LETTER.height - MARGIN - 4);
-  drawFiducial(page, MARGIN - 6, MARGIN - 6);
-  drawFiducial(page, LETTER.width - MARGIN - 6, MARGIN - 6);
-
-  const qrSize = 86;
+  const qrSize = 92;
   const qrX = LETTER.width - MARGIN - qrSize;
-  const qrY = LETTER.height - MARGIN - qrSize - 14;
-  drawQrOnPage(page, instance.instance_id, qrX, qrY, qrSize);
-  // Human-readable fallback if the QR photo fails
-  page.drawText(`ID ${instance.instance_id}`, {
-    x: Math.max(MARGIN, qrX - 4),
-    y: qrY - 10,
-    size: 6,
+  const qrY = LETTER.height - MARGIN - qrSize - 18;
+  drawQrOnPage(page, opts.gradeUrl, qrX, qrY, qrSize);
+
+  const codeLabel = formatSheetCode(instance.instance_id);
+  page.drawText("Scan to grade", {
+    x: Math.max(MARGIN, qrX - 2),
+    y: qrY + qrSize + 6,
+    size: 7,
     font,
-    color: rgb(0.25, 0.25, 0.25),
+    color: rgb(0.35, 0.35, 0.35),
+  });
+  page.drawText(codeLabel, {
+    x: Math.max(MARGIN, qrX - 2),
+    y: qrY - 12,
+    size: 9,
+    font: fontBold,
+    color: rgb(0.15, 0.15, 0.15),
   });
 
   let y = LETTER.height - MARGIN - 8;
@@ -117,7 +118,6 @@ export async function buildExamPdf(instance: ExamInstanceMap): Promise<Uint8Arra
       page.drawText(line, { x: left, y, size: 8, font });
       y -= 9;
     }
-    // Exactly one bubble beside each of A–D (40 bubbles per 10-question sheet).
     for (const lines of choiceBlocks) {
       drawBubble(page, left, y - 1);
       let cy = y;
@@ -130,10 +130,10 @@ export async function buildExamPdf(instance: ExamInstanceMap): Promise<Uint8Arra
     y -= 3;
   }
 
-  page.drawText(`instance:${instance.instance_id.slice(0, 12)}…`, {
+  page.drawText(`Sheet ${codeLabel}`, {
     x: MARGIN,
     y: MARGIN - 2,
-    size: 6,
+    size: 7,
     font,
     color: rgb(0.45, 0.45, 0.45),
   });

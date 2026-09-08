@@ -7,7 +7,7 @@ export function zipPdfs(files: Array<{ name: string; bytes: Uint8Array }>): Uint
   }
   // also include a tiny readme
   obj["README.txt"] = strToU8(
-    "AntiCheatingQuiz exam sheets\nPrint single-sided Letter.\nEach QR identifies one student instance.\n",
+    "AntiCheatingQuiz exam sheets\nPrint single-sided Letter.\nEach QR opens a phone grading page for that student only.\n",
   );
   return zipSync(obj, { level: 6 });
 }

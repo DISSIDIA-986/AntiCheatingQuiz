@@ -18,7 +18,9 @@ describe("pdf generation", () => {
     );
     expect(instances[0]!.questions).toHaveLength(10);
     expect(instances[0]!.questions.length * 4).toBe(40);
-    const pdf = await buildExamPdf(instances[0]!);
+    const pdf = await buildExamPdf(instances[0]!, {
+      gradeUrl: `https://example.test/s/${instances[0]!.instance_id}`,
+    });
     expect(pdf.byteLength).toBeGreaterThan(1000);
     expect(String.fromCharCode(...pdf.slice(0, 4))).toBe("%PDF");
   });
@@ -30,7 +32,9 @@ describe("pdf generation", () => {
     if (!bank.ok || !roster.ok) return;
     const instances = generateInstances(bank.questions, roster.students, "pdf-all", "gen-pdf-all");
     for (const inst of instances) {
-      const pdf = await buildExamPdf(inst);
+      const pdf = await buildExamPdf(inst, {
+        gradeUrl: `https://example.test/s/${inst.instance_id}`,
+      });
       expect(pdf.byteLength).toBeGreaterThan(1000);
     }
   });

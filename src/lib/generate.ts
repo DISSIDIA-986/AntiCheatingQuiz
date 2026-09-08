@@ -4,6 +4,7 @@ import {
   sampleRanges,
 } from "./bank";
 import type { RosterStudent } from "./bank";
+import { randomSheetCode, SHEET_CODE_LEN } from "./sheet-code";
 
 export type Letter = "A" | "B" | "C" | "D";
 
@@ -122,18 +123,19 @@ export function generateInstances(
 }
 
 function cryptoRandomId(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return randomSheetCode(SHEET_CODE_LEN);
 }
 
-/** @deprecated test helper — deterministic ids only for unit tests */
+/** Test helper — deterministic sheet codes only for unit tests */
 export function seededInstanceIdFactory(seed: string): () => string {
+  const alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
   const rnd = createRng(seed);
   return () => {
-    const bytes = new Uint8Array(16);
-    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(rnd() * 256);
-    return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    let out = "";
+    for (let i = 0; i < SHEET_CODE_LEN; i++) {
+      out += alphabet[Math.floor(rnd() * alphabet.length)]!;
+    }
+    return out;
   };
 }
 
