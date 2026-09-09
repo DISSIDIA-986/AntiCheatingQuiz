@@ -12,7 +12,8 @@ export function zipPdfs(files: Array<{ name: string; bytes: Uint8Array }>): Uint
   return zipSync(obj, { level: 6 });
 }
 
-export function safeFilename(name: string, id: string): string {
+export function safeFilename(name: string, id: string, instanceId = ""): string {
   const base = `${id}_${name}`.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
-  return `${base}.pdf`;
+  const unique = instanceId.replace(/[^a-zA-Z0-9_-]+/g, "").slice(0, 24);
+  return `${base}${unique ? `_${unique}` : ""}.pdf`;
 }

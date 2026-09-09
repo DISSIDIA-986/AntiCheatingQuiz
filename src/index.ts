@@ -199,7 +199,7 @@ e.post("/api/generate", async (c) => {
     try {
       const gradeUrl = `${origin}${sheetGradePath(inst.instance_id)}`;
       const pdf = await buildExamPdf(inst, { gradeUrl });
-      files.push({ name: safeFilename(inst.student_name, inst.student_id), bytes: pdf });
+      files.push({ name: safeFilename(inst.student_name, inst.student_id, inst.instance_id), bytes: pdf });
     } catch (err) {
       return c.json(
         { error: "pdf_failed", message: err instanceof Error ? err.message : String(err) },

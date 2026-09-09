@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { validateBankCsv, validateRosterCsv, renderQuestion } from "../src/lib/bank";
 import { createRng, generateInstances, scoreAnswers, seededInstanceIdFactory } from "../src/lib/generate";
 import { parseCsv, toCsv } from "../src/lib/csv";
+import { safeFilename, zipPdfs } from "../src/lib/zip";
+import { unzipSync } from "fflate";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -23,6 +25,20 @@ describe("csv", () => {
     expect(text).toContain("'=1+1");
     expect(text).toContain("'+cmd");
     expect(text).toContain("'@sum");
+  });
+});
+
+describe("exam ZIP safety", () => {
+  it("keeps filenames unique when student IDs sanitize to the same text", () => {
+    const a = safeFilename("Same Student", "A/B", "INSTANCE001");
+    const b = safeFilename("Same Student", "A?B", "INSTANCE002");
+    expect(a).not.toBe(b);
+
+    const zip = unzipSync(zipPdfs([
+      { name: a, bytes: new Uint8Array([1]) },
+      { name: b, bytes: new Uint8Array([2]) },
+    ]));
+    expect(Object.keys(zip).filter((name) => name.endsWith(".pdf"))).toHaveLength(2);
   });
 });
 
