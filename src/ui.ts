@@ -6,6 +6,7 @@ export function examAppHtml(token: string): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="referrer" content="no-referrer" />
+  <link rel="icon" href="data:," />
   <title>AntiCheatingQuiz</title>
   <style>
     :root {
@@ -76,6 +77,10 @@ export function examAppHtml(token: string): string {
     }
     button.secondary { background: #2c3a4a; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button:focus-visible, a:focus-visible, input:focus-visible, summary:focus-visible {
+      outline: 3px solid #d49b24;
+      outline-offset: 3px;
+    }
     .msg { margin-top: 0.75rem; white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 0.82rem; }
     .err { color: var(--warn); }
     .ok { color: var(--accent); }
@@ -117,6 +122,33 @@ export function examAppHtml(token: string): string {
       color: #2c3a4a;
     }
     .print-steps li { margin: 0.35rem 0; }
+    .file-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.85rem;
+      margin-top: 0.9rem;
+    }
+    .file-card {
+      border: 1px solid var(--line);
+      background: #f7faf8;
+      padding: 0.85rem;
+    }
+    .file-card label { font-weight: 700; margin-top: 0; color: #2c3a4a; }
+    .file-card p { margin: 0.35rem 0 0.65rem; font: 0.86rem/1.4 "Avenir Next", "Segoe UI", sans-serif; }
+    .file-card a { color: var(--accent); }
+    .readiness {
+      margin: 0.85rem 0 0;
+      font: 600 0.9rem/1.4 "Avenir Next", "Segoe UI", sans-serif;
+      color: #596579;
+    }
+    .readiness.ready { color: var(--accent); }
+    details.print-guide { margin-top: 0.9rem; border-top: 1px solid var(--line); padding-top: 0.75rem; }
+    details.print-guide summary { cursor: pointer; color: var(--accent); font: 600 0.92rem/1.4 "Avenir Next", "Segoe UI", sans-serif; }
+    .error-list { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+    .error-list li { margin: 0.3rem 0; }
+    @media (max-width: 680px) {
+      .file-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -129,37 +161,41 @@ export function examAppHtml(token: string): string {
   <main>
     <section>
       <h2>1. Create &amp; print exam sheets</h2>
-      <p class="sub">This is the paper exam step: the app builds <strong>one PDF per student</strong>. You download a zip, open each PDF (or all of them), and print on Letter paper from your computer.</p>
-      <div class="downloads">
-        <strong>Download CSV files first (keeps columns correct)</strong>
-        <a href="/templates/question-bank-template.csv">Question bank template</a>
-        <a href="/templates/question-bank-sample.csv">Question bank sample</a>
-        <a href="/templates/student-list-template.csv">Student list template</a>
-        <a href="/templates/student-list-sample.csv">Student list sample</a>
+      <p class="sub">Add your 10 questions and class roster. The app creates one personalized, printable PDF for each student.</p>
+      <div class="file-grid">
+        <div class="file-card">
+          <label for="bank">Question bank CSV</label>
+          <p><a href="/templates/question-bank-template.csv">Download blank template</a> · <a href="/templates/question-bank-sample.csv">View sample</a><br/>Must contain exactly 10 multiple-choice questions.</p>
+          <input id="bank" type="file" accept=".csv,text/csv" />
+        </div>
+        <div class="file-card">
+          <label for="roster">Student roster CSV</label>
+          <p><a href="/templates/student-list-template.csv">Download blank template</a> · <a href="/templates/student-list-sample.csv">View sample</a><br/>Add each student’s name and ID (up to 50 students).</p>
+          <input id="roster" type="file" accept=".csv,text/csv" />
+        </div>
       </div>
-      <label>Question bank CSV (exactly 10 MCQs)</label>
-      <input id="bank" type="file" accept=".csv,text/csv" />
-      <label>Student roster CSV</label>
-      <input id="roster" type="file" accept=".csv,text/csv" />
       <label class="check"><input id="forceGen" type="checkbox" /> Replace existing papers (deletes prior grades)</label>
-      <button id="btnGen">Create exam sheets (download ZIP)</button>
-      <ol class="print-steps">
-        <li>Click the button above → a zip file downloads (one PDF per student, named by ID).</li>
-        <li>Unzip the file on your computer.</li>
-        <li>Open a PDF → <strong>File → Print</strong> (or Cmd/Ctrl+P).</li>
-        <li>Paper size: <strong>Letter</strong>, single-sided, actual size (100%, no “fit to page” if you can avoid it).</li>
-        <li>Print every student’s sheet and hand each person <em>their</em> named copy.</li>
-      </ol>
-      <div id="genMsg" class="msg"></div>
+      <p id="genReadiness" class="readiness" role="status" aria-live="polite">Choose both CSV files to continue.</p>
+      <button id="btnGen" disabled>Create exam sheets (download ZIP)</button>
+      <div id="genMsg" class="msg" role="status" aria-live="polite" tabindex="-1"></div>
+      <details class="print-guide">
+        <summary>After the ZIP downloads: how to print</summary>
+        <ol class="print-steps">
+          <li>Unzip the file on your computer.</li>
+          <li>Open each PDF → <strong>File → Print</strong> (or Cmd/Ctrl+P).</li>
+          <li>Use <strong>Letter</strong> paper, single-sided, actual size (100%).</li>
+          <li>Hand each student their named sheet.</li>
+        </ol>
+      </details>
     </section>
     <section>
       <h2>2. Grade on your phone</h2>
       <p class="sub"><strong>Normal path:</strong> open the iPhone Camera (or any QR app), point at the sheet’s QR → Safari opens a grading page for that student → tap the bubbles you see on paper → Save. No copy/paste needed.</p>
       <p class="sub">Use the tools below only if the camera link fails (fallback on this computer).</p>
-      <label>Sheet photo (optional fallback)</label>
+      <label for="photo">Sheet photo (optional fallback)</label>
       <input id="photo" type="file" accept="image/*" capture="environment" />
       <button id="btnDecode" class="secondary">Read QR from photo</button>
-      <label>Or type/paste sheet code</label>
+      <label for="instanceId">Or type/paste sheet code</label>
       <input id="instanceId" type="text" placeholder="e.g. 7K4M-2Q8R-XP6T" autocomplete="off" />
       <button id="btnLoad">Load sheet</button>
       <div id="gradeBox"></div>
@@ -182,23 +218,75 @@ export function examAppHtml(token: string): string {
       return await f.text();
     }
 
-    function setMsg(el, text, ok) {
-      el.textContent = text;
+    function setMsg(el, text, ok, html) {
+      if (html) el.innerHTML = text;
+      else el.textContent = text;
       el.className = "msg " + (ok ? "ok" : "err");
     }
 
-    document.getElementById("btnGen").onclick = async () => {
+    const bankInput = document.getElementById("bank");
+    const rosterInput = document.getElementById("roster");
+    const genButton = document.getElementById("btnGen");
+    const readiness = document.getElementById("genReadiness");
+    let generating = false;
+
+    function updateGenerationReadiness() {
+      const hasBank = Boolean(bankInput.files && bankInput.files[0]);
+      const hasRoster = Boolean(rosterInput.files && rosterInput.files[0]);
+      genButton.disabled = generating || !hasBank || !hasRoster;
+      bankInput.disabled = generating;
+      rosterInput.disabled = generating;
+      document.getElementById("forceGen").disabled = generating;
+      readiness.className = "readiness" + (hasBank && hasRoster ? " ready" : "");
+      if (generating) readiness.textContent = "Checking files and creating exam sheets…";
+      else if (hasBank && hasRoster) readiness.textContent = "Ready — both files are selected.";
+      else if (hasBank) readiness.textContent = "Question bank selected. Add the student roster.";
+      else if (hasRoster) readiness.textContent = "Student roster selected. Add the question bank.";
+      else readiness.textContent = "Choose both CSV files to continue.";
+    }
+
+    function friendlyGenerationError(err) {
+      if (err && (err.error === "bank_invalid" || err.error === "roster_invalid")) {
+        const source = err.error === "bank_invalid" ? "question bank" : "student roster";
+        const issues = Array.isArray(err.issues) ? err.issues : [];
+        const items = issues.map((issue) => {
+          const where = issue && issue.row ? "Row " + issue.row + ": " : "";
+          return "<li>" + escapeHtml(where + String((issue && issue.message) || "Check this file.")) + "</li>";
+        }).join("");
+        return "<strong>Please fix the " + source + " CSV, then try again.</strong>" +
+          (items ? '<ul class="error-list">' + items + "</ul>" : "") +
+          '<p>Tip: compare your file with the blank template or sample above.</p>';
+      }
+      if (err && err.error === "already_generated") {
+        return "<strong>Exam sheets already exist.</strong><p>To keep current grades and printed QR codes, stop here. To start over, select “Replace existing papers,” then try again.</p>";
+      }
+      const message = err && (err.message || err.error);
+      return "<strong>We could not create the exam sheets.</strong><p>" +
+        escapeHtml(String(message || "Please check both CSV files and try again.")) + "</p>";
+    }
+
+    bankInput.addEventListener("change", updateGenerationReadiness);
+    rosterInput.addEventListener("change", updateGenerationReadiness);
+    updateGenerationReadiness();
+
+    genButton.onclick = async () => {
       const msg = document.getElementById("genMsg");
       try {
-        const bank = await readFile(document.getElementById("bank"));
-        const roster = await readFile(document.getElementById("roster"));
-        let force = document.getElementById("forceGen").checked;
+        const bankFile = bankInput.files && bankInput.files[0];
+        const rosterFile = rosterInput.files && rosterInput.files[0];
+        if (!bankFile || !rosterFile) throw new Error("Choose both CSV files first.");
+        const force = document.getElementById("forceGen").checked;
         if (force) {
           const ok = window.confirm(
             "Replace existing papers?\\n\\nThis DELETES current grades and creates NEW QR codes.\\nAlready-printed sheets will NOT match the new files.\\n\\nOK = replace, Cancel = abort",
           );
           if (!ok) return;
         }
+        generating = true;
+        updateGenerationReadiness();
+        setMsg(msg, "Checking your files and creating personalized sheets. This may take a moment.", true);
+        const bank = await bankFile.text();
+        const roster = await rosterFile.text();
         const res = await fetch(base + "/api/generate", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -206,14 +294,7 @@ export function examAppHtml(token: string): string {
         });
         if (!res.ok) {
           const err = await res.json().catch(async () => ({ error: await res.text() }));
-          if (res.status === 409 && err.error === "already_generated") {
-            throw new Error(
-              "Papers already exist. Tick “Replace existing papers”, confirm the warning, then try again.\\n\\n" +
-                "Warning: regenerated sheets get NEW QR codes — old printouts will not grade.\\n\\n" +
-                JSON.stringify(err, null, 2),
-            );
-          }
-          throw new Error(JSON.stringify(err, null, 2));
+          throw err;
         }
         const blob = await res.blob();
         const a = document.createElement("a");
@@ -223,7 +304,11 @@ export function examAppHtml(token: string): string {
         setMsg(msg, "ZIP downloaded. Unzip → open each PDF → File → Print (Letter, single-sided). Hand each student their named sheet.", true);
         refreshSummary();
       } catch (e) {
-        setMsg(msg, String(e.message || e), false);
+        setMsg(msg, friendlyGenerationError(e), false, true);
+        msg.focus();
+      } finally {
+        generating = false;
+        updateGenerationReadiness();
       }
     };
 
@@ -402,6 +487,7 @@ export function sheetGradeHtml(code: string): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="referrer" content="no-referrer" />
+  <link rel="icon" href="data:," />
   <title>Grade sheet</title>
   <style>
     :root {
@@ -586,6 +672,7 @@ export function homeHtml(): string {
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="referrer" content="no-referrer"/>
+<link rel="icon" href="data:,"/>
 <title>AntiCheatingQuiz</title>
 <style>
 body{font-family:Georgia,serif;background:#f3efe6;color:#1c2430;padding:2rem;max-width:40rem;margin:auto;line-height:1.45}
@@ -611,6 +698,7 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="referrer" content="no-referrer" />
+  <link rel="icon" href="data:," />
   <title>Help — AntiCheatingQuiz</title>
   <style>
     :root {

@@ -1,0 +1,1 @@
+- [Wrangler dependency compatibility](wrangler-dependency-compatibility.md) — imported lockfile has a Workers types peer mismatch; avoid forced installs or unrelated lock churn.
