@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { validateBankCsv, validateRosterCsv } from "../src/lib/bank";
 import { generateInstances } from "../src/lib/generate";
-import { buildExamPdf } from "../src/lib/pdf";
+import { buildCombinedExamPdf, buildExamPdf } from "../src/lib/pdf";
+import { PDFDocument } from "pdf-lib";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -37,6 +38,62 @@ describe("pdf generation", () => {
       });
       expect(pdf.byteLength).toBeGreaterThan(1000);
     }
+  });
+
+  it("combines a 40-student roster into one Letter page per student in roster order", async () => {
+    const bank = validateBankCsv(readFileSync(resolve("samples/bank.csv"), "utf8"));
+    expect(bank.ok).toBe(true);
+    if (!bank.ok) return;
+    const students = Array.from({ length: 40 }, (_, index) => ({
+      student_name: `Student ${index + 1}`,
+      student_id: `S${String(index + 1).padStart(3, "0")}`,
+    }));
+    const instances = generateInstances(bank.questions, students, "pdf-40", "gen-pdf-40");
+    const bytes = await buildCombinedExamPdf(
+      instances.map((instance) => ({
+        instance,
+        options: { gradeUrl: `https://example.test/s/${instance.instance_id}` },
+      })),
+    );
+    const document = await PDFDocument.load(bytes);
+    expect(document.getPageCount()).toBe(40);
+    for (const page of document.getPages()) {
+      expect(page.getSize()).toEqual({ width: 612, height: 792 });
+    }
+    expect(instances.map((instance) => instance.student_id)).toEqual(students.map((student) => student.student_id));
+    expect(new Set(instances.map((instance) => instance.instance_id)).size).toBe(40);
+  });
+
+  it("preserves supported Unicode in names, IDs, and question content", async () => {
+    const bank = validateBankCsv(readFileSync(resolve("samples/bank.csv"), "utf8"));
+    expect(bank.ok).toBe(true);
+    if (!bank.ok) return;
+    const [instance] = generateInstances(
+      bank.questions,
+      [{ student_name: "Zoë Álvarez", student_id: "ÉLÈVE-42" }],
+      "pdf-unicode",
+      "gen-pdf-unicode",
+    );
+    instance!.questions[0]!.stem += " — café déjà vu";
+    const bytes = await buildCombinedExamPdf([
+      { instance: instance!, options: { gradeUrl: `https://example.test/s/${instance!.instance_id}` } },
+    ]);
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  });
+
+  it("rejects unsupported Unicode instead of silently corrupting student identity", async () => {
+    const bank = validateBankCsv(readFileSync(resolve("samples/bank.csv"), "utf8"));
+    expect(bank.ok).toBe(true);
+    if (!bank.ok) return;
+    const [instance] = generateInstances(
+      bank.questions,
+      [{ student_name: "李 東京", student_id: "S-UNICODE" }],
+      "pdf-unsupported-unicode",
+      "gen-pdf-unsupported-unicode",
+    );
+    await expect(
+      buildExamPdf(instance!, { gradeUrl: `https://example.test/s/${instance!.instance_id}` }),
+    ).rejects.toThrow(/unsupported character U\+/);
   });
 });
 

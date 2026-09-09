@@ -42,7 +42,8 @@ describe("desktop authoring UI", () => {
 
   it("keeps printing guidance available without dominating the main flow", () => {
     expect(html).toContain('<details class="print-guide">');
-    expect(html).toContain("After the ZIP downloads: how to print");
+    expect(html).toContain("Combined PDF — print the whole roster");
+    expect(html).toContain("<summary>How to print</summary>");
   });
 
   it("does not trigger a missing favicon request", () => {

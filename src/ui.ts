@@ -161,7 +161,7 @@ export function examAppHtml(token: string): string {
   <main>
     <section>
       <h2>1. Create &amp; print exam sheets</h2>
-      <p class="sub">Add your 10 questions and class roster. The app creates one personalized, printable PDF for each student.</p>
+      <p class="sub">Add your 10 questions and class roster. The app creates one personalized sheet per student, as both individual files and one combined print-ready PDF.</p>
       <div class="file-grid">
         <div class="file-card">
           <label for="bank">Question bank CSV</label>
@@ -178,11 +178,16 @@ export function examAppHtml(token: string): string {
       <p id="genReadiness" class="readiness" role="status" aria-live="polite">Choose both CSV files to continue.</p>
       <button id="btnGen" disabled>Create exam sheets (download ZIP)</button>
       <div id="genMsg" class="msg" role="status" aria-live="polite" tabindex="-1"></div>
+      <div id="sheetDownloads" class="downloads" hidden>
+        <strong>Print or download</strong>
+        <a href="/e/${token}/api/exam-sheets.pdf">Combined PDF — print the whole roster</a>
+        <span>Individual PDFs are in the ZIP downloaded during generation.</span>
+      </div>
       <details class="print-guide">
-        <summary>After the ZIP downloads: how to print</summary>
+        <summary>How to print</summary>
         <ol class="print-steps">
-          <li>Unzip the file on your computer.</li>
-          <li>Open each PDF → <strong>File → Print</strong> (or Cmd/Ctrl+P).</li>
+          <li>Open the combined PDF to print the whole roster in one action, or unzip the ZIP for individual files.</li>
+          <li>Choose <strong>File → Print</strong> (or Cmd/Ctrl+P).</li>
           <li>Use <strong>Letter</strong> paper, single-sided, actual size (100%).</li>
           <li>Hand each student their named sheet.</li>
         </ol>
@@ -301,7 +306,8 @@ export function examAppHtml(token: string): string {
         a.href = URL.createObjectURL(blob);
         a.download = "exam-sheets.zip";
         a.click();
-        setMsg(msg, "ZIP downloaded. Unzip → open each PDF → File → Print (Letter, single-sided). Hand each student their named sheet.", true);
+        document.getElementById("sheetDownloads").hidden = false;
+        setMsg(msg, "ZIP downloaded. Use the combined PDF below to print the whole roster in order (Letter, single-sided), or keep using the individual files in the ZIP.", true);
         refreshSummary();
       } catch (e) {
         setMsg(msg, friendlyGenerationError(e), false, true);
@@ -471,6 +477,7 @@ export function examAppHtml(token: string): string {
         if (!res.ok) return;
         const data = await res.json();
         el.innerHTML = "<p>Instances: " + data.instances + " · Graded: " + data.graded + "</p>";
+        document.getElementById("sheetDownloads").hidden = data.instances < 1;
       } catch {}
     }
 

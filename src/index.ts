@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { validateBankCsv, validateRosterCsv } from "./lib/bank";
 import { sha256Hex, randomToken } from "./lib/crypto";
 import { generateInstances, scoreAnswers, type ExamInstanceMap, type Letter } from "./lib/generate";
-import { buildExamPdf } from "./lib/pdf";
+import { buildCombinedExamPdf, buildExamPdf } from "./lib/pdf";
 import { safeFilename, zipPdfs } from "./lib/zip";
 import { toCsv } from "./lib/csv";
 import { getTemplate, csvDownloadResponse } from "./lib/templates";
@@ -264,6 +264,49 @@ e.post("/api/generate", async (c) => {
       "cache-control": "no-store, private",
     },
   });
+});
+
+e.get("/api/exam-sheets.pdf", async (c) => {
+  const exam = c.get("exam");
+  try {
+    const payload = await c.env.DB
+      .prepare("SELECT roster_json FROM exam_payloads WHERE exam_id = ?")
+      .bind(exam.id)
+      .first<{ roster_json: string }>();
+    if (!payload) return c.json({ error: "not_generated" }, 404);
+
+    const rows = await c.env.DB
+      .prepare("SELECT student_id, map_json FROM instances WHERE exam_id = ?")
+      .bind(exam.id)
+      .all<{ student_id: string; map_json: string }>();
+    const byStudentId = new Map(rows.results.map((row) => [row.student_id, row.map_json]));
+    const roster = JSON.parse(payload.roster_json) as Array<{ student_id: string }>;
+    const instances = roster.map((student) => {
+      const json = byStudentId.get(student.student_id);
+      if (!json) throw new Error("Generated sheet set is incomplete");
+      return JSON.parse(json) as ExamInstanceMap;
+    });
+    const origin = new URL(c.req.url).origin;
+    const pdf = await buildCombinedExamPdf(
+      instances.map((instance) => ({
+        instance,
+        options: { gradeUrl: `${origin}${sheetGradePath(instance.instance_id)}` },
+      })),
+    );
+    return new Response(pdf, {
+      headers: {
+        "content-type": "application/pdf",
+        "content-disposition": 'attachment; filename="exam-sheets-combined.pdf"',
+        "referrer-policy": "no-referrer",
+        "cache-control": "no-store, private",
+      },
+    });
+  } catch (err) {
+    return c.json(
+      { error: "pdf_failed", message: "Could not build the combined PDF from the generated sheets." },
+      500,
+    );
+  }
 });
 
 e.get("/api/instances/:id", async (c) => {

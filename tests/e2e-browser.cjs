@@ -5,6 +5,7 @@ const { join } = require("node:path");
 const { randomUUID } = require("node:crypto");
 const http = require("node:http");
 const WebSocket = require("ws");
+const { PDFDocument } = require("pdf-lib");
 
 const root = join(__dirname, "..");
 const temp = mkdtempSync(join(tmpdir(), "anti-cheating-quiz-e2e-"));
@@ -187,6 +188,7 @@ async function main() {
   })`);
   assert(Object.values(busy).every(Boolean), "Generation controls were not locked together");
   await poll(evaluate, `genMsg.textContent.includes("ZIP downloaded")`, 45_000);
+  assert(await evaluate("!sheetDownloads.hidden"), "Combined PDF download was not shown after generation");
   const summary = await poll(evaluate, `summary.textContent.includes("Instances: 5") && summary.textContent`);
   assert(summary.includes("Graded: 0"), "Generated summary is incorrect");
 
@@ -366,11 +368,23 @@ async function main() {
     throw new Error(`40-student generation failed: ${generated.status} ${await generated.text()}`);
   }
   assert((await generated.arrayBuffer()).byteLength > 40_000, "40-student ZIP is unexpectedly small");
+  const combinedResponse = await fetch(`${baseUrl}${fullExam.path}/api/exam-sheets.pdf`);
+  assert(combinedResponse.ok, `Combined PDF download failed: ${combinedResponse.status}`);
+  assert(
+    combinedResponse.headers.get("content-disposition")?.includes("exam-sheets-combined.pdf"),
+    "Combined PDF filename is incorrect",
+  );
+  const combinedPdf = await PDFDocument.load(await combinedResponse.arrayBuffer());
+  assert(combinedPdf.getPageCount() === 40, "Combined PDF does not contain exactly 40 sheets");
+  assert(
+    combinedPdf.getPages().every((page) => page.getWidth() === 612 && page.getHeight() === 792),
+    "Combined PDF contains a non-Letter page",
+  );
   const fullSummary = await (await fetch(`${baseUrl}${fullExam.path}/api/summary`)).json();
   assert(fullSummary.instances === 40 && fullSummary.graded === 0, "40-student summary is incorrect");
 
   browser.socket.close();
-  console.log("E2E passed: grading authorization/expiry/regrades, desktop/mobile UI, ZIP generation, failures, cancellation, XSS safety, and 40-student load.");
+  console.log("E2E passed: grading authorization/expiry/regrades, desktop/mobile UI, ZIP and combined PDF generation, failures, cancellation, XSS safety, and 40-student load.");
 }
 
 main()

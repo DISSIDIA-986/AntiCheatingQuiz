@@ -82,8 +82,8 @@ export async function buildExamPdf(
     font: fontBold,
   });
   y -= 14;
-  const nameLine = `Name: ${truncate(instance.student_name, 42)}`;
-  const idLine = `Student ID: ${truncate(instance.student_id, 28)}`;
+  const nameLine = ensurePdfText(`Name: ${truncate(instance.student_name, 42)}`, font);
+  const idLine = ensurePdfText(`Student ID: ${truncate(instance.student_id, 28)}`, font);
   page.drawText(nameLine, { x: MARGIN, y, size: 9, font });
   y -= 12;
   page.drawText(idLine, { x: MARGIN, y, size: 9, font });
@@ -102,10 +102,10 @@ export async function buildExamPdf(
 
   for (let i = 0; i < instance.questions.length; i++) {
     const q = instance.questions[i]!;
-    const stem = `${i + 1}. ${q.stem}`;
+    const stem = ensurePdfText(`${i + 1}. ${q.stem}`, font);
     const stemLines = wrapText(stem, font, 8, contentWidth);
     const choiceBlocks = (["A", "B", "C", "D"] as const).map((letter) =>
-      wrapText(`${letter}) ${q.choices[letter]}`, font, 7.5, contentWidth - 14),
+      wrapText(ensurePdfText(`${letter}) ${q.choices[letter]}`, font), font, 7.5, contentWidth - 14),
     );
     const blockHeight =
       stemLines.length * 9 + choiceBlocks.reduce((s, lines) => s + lines.length * 9 + 1, 0) + 6;
@@ -141,6 +141,19 @@ export async function buildExamPdf(
   return doc.save();
 }
 
+export async function buildCombinedExamPdf(
+  sheets: Array<{ instance: ExamInstanceMap; options: BuildPdfOptions }>,
+): Promise<Uint8Array> {
+  const combined = await PDFDocument.create();
+  for (const sheet of sheets) {
+    const source = await PDFDocument.load(await buildExamPdf(sheet.instance, sheet.options));
+    const [page] = await combined.copyPages(source, [0]);
+    if (!page) throw new Error(`Could not combine sheet for ${sheet.instance.student_id}`);
+    combined.addPage(page);
+  }
+  return combined.save();
+}
+
 function drawBubble(page: PDFPage, x: number, y: number): void {
   page.drawCircle({
     x: x + 3.5,
@@ -155,6 +168,20 @@ function truncate(s: string, max: number): string {
   const t = s.trim();
   if (t.length <= max) return t;
   return `${t.slice(0, Math.max(0, max - 1))}…`;
+}
+
+function ensurePdfText(text: string, font: PDFFont): string {
+  for (const character of text) {
+    try {
+      font.encodeText(character);
+    } catch {
+      const codePoint = character.codePointAt(0)?.toString(16).toUpperCase().padStart(4, "0");
+      throw new Error(
+        `PDF text contains unsupported character U+${codePoint}. Use Latin characters supported by Helvetica.`,
+      );
+    }
+  }
+  return text;
 }
 
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
