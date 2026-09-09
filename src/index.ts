@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { validateBankCsv, validateRosterCsv } from "./lib/bank";
 import { sha256Hex, randomToken } from "./lib/crypto";
 import { generateInstances, scoreAnswers, type ExamInstanceMap, type Letter } from "./lib/generate";
@@ -32,6 +32,8 @@ const ALLOWED_STATUS = new Set([
 
 const MAX_JSON_BYTES = 1_500_000;
 const MAX_TITLE_LEN = 120;
+const GRADING_SESSION_COOKIE = "acq_grader";
+const GRADING_SESSION_SECONDS = 12 * 60 * 60;
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -121,6 +123,7 @@ function canonicalToPrintedAnswers(
 }
 
 const e = new Hono<{ Bindings: Env; Variables: { exam: ExamRow; token: string } }>();
+type ExamContext = Context<{ Bindings: Env; Variables: { exam: ExamRow; token: string } }>;
 
 e.use("*", async (c, next) => {
   const token = c.req.param("token");
@@ -133,8 +136,27 @@ e.use("*", async (c, next) => {
   securityHeaders(c.res, true);
 });
 
-e.get("/", (c) => c.html(examAppHtml(c.get("token"))));
-e.get("", (c) => c.html(examAppHtml(c.get("token"))));
+async function examWorkspaceResponse(c: ExamContext): Promise<Response> {
+  const exam = c.get("exam");
+  const session = randomToken();
+  const tokenHash = await sha256Hex(session);
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM grading_sessions WHERE expires_at <= datetime('now')"),
+    c.env.DB.prepare(
+      "INSERT INTO grading_sessions (token_hash, exam_id, expires_at) VALUES (?, ?, datetime('now', '+12 hours'))",
+    ).bind(tokenHash, exam.id),
+  ]);
+  const response = await c.html(examAppHtml(c.get("token")));
+  const secure = new URL(c.req.url).protocol === "https:" ? "; Secure" : "";
+  response.headers.append(
+    "Set-Cookie",
+    `${GRADING_SESSION_COOKIE}=${session}; Path=/; Max-Age=${GRADING_SESSION_SECONDS}; HttpOnly; SameSite=Strict${secure}`,
+  );
+  return response;
+}
+
+e.get("/", examWorkspaceResponse);
+e.get("", examWorkspaceResponse);
 e.get("/help", (c) => c.html(helpHtml({ backHref: `/e/${c.get("token")}` })));
 e.get("/help/", (c) => c.redirect(`/e/${c.get("token")}/help`, 302));
 
@@ -255,7 +277,7 @@ e.get("/api/instances/:id", async (c) => {
 e.post("/api/instances/:id/grade", async (c) => {
   const exam = c.get("exam");
   const id = extractSheetLookup(c.req.param("id"));
-  let body: { answers: Record<string, string>; status?: string };
+  let body: { answers: Record<string, string>; status?: string; regrade?: boolean };
   try {
     body = await readJsonLimited(c);
   } catch (err) {
@@ -357,23 +379,72 @@ e.get("/api/results.csv", async (c) => {
 
 e.post("/api/revoke", async (c) => {
   const exam = c.get("exam");
-  await c.env.DB.prepare("UPDATE exams SET revoked = 1 WHERE id = ?").bind(exam.id).run();
+  await c.env.DB.batch([
+    c.env.DB.prepare("UPDATE exams SET revoked = 1 WHERE id = ?").bind(exam.id),
+    c.env.DB.prepare("DELETE FROM grading_sessions WHERE exam_id = ?").bind(exam.id),
+  ]);
   return c.json({ revoked: true });
 });
 
 app.route("/e/:token", e);
 
-/** Phone-friendly single-sheet grading — QR opens this page (no exam secret needed). */
+function readCookie(request: Request, name: string): string {
+  const cookies = request.headers.get("Cookie") ?? "";
+  for (const part of cookies.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(value.join("="));
+  }
+  return "";
+}
+
+async function isAuthorizedGrader(db: D1Database, request: Request, examId: string): Promise<boolean> {
+  const token = readCookie(request, GRADING_SESSION_COOKIE);
+  if (!token) return false;
+  const tokenHash = await sha256Hex(token);
+  const session = await db
+    .prepare(
+      `SELECT 1 AS ok
+       FROM grading_sessions s
+       JOIN exams e ON e.id = s.exam_id
+       WHERE s.token_hash = ? AND s.exam_id = ?
+         AND s.expires_at > datetime('now') AND e.revoked = 0`,
+    )
+    .bind(tokenHash, examId)
+    .first<{ ok: number }>();
+  return Boolean(session);
+}
+
+function gradingUnauthorized(c: { json: (body: object, status: 401) => Response }): Response {
+  const response = c.json(
+    {
+      error: "instructor_authorization_required",
+      message: "Open this exam's private instructor link on this device, then scan the sheet again.",
+    },
+    401,
+  );
+  securityHeaders(response, true);
+  return response;
+}
+
+/** Phone-friendly single-sheet grading — QR opens this page after instructor login. */
 app.get("/s/:code", async (c) => {
   const code = extractSheetLookup(c.req.param("code"));
   const row = await c.env.DB
-    .prepare("SELECT id FROM instances WHERE id = ?")
+    .prepare("SELECT id, exam_id FROM instances WHERE id = ?")
     .bind(code)
-    .first<{ id: string }>();
+    .first<{ id: string; exam_id: string }>();
   if (!row) {
     const res = c.html(
       `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Sheet not found</title></head><body style="font-family:system-ui;padding:1.5rem;max-width:28rem"><h1>Sheet not found</h1><p>This QR may be from an old printout that was regenerated, or the code was mistyped.</p></body></html>`,
       404,
+    );
+    securityHeaders(res, true);
+    return res;
+  }
+  if (!(await isAuthorizedGrader(c.env.DB, c.req.raw, row.exam_id))) {
+    const res = c.html(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="referrer" content="no-referrer"/><title>Instructor sign-in required</title></head><body style="font-family:system-ui;padding:1.5rem;max-width:28rem"><h1>Instructor sign-in required</h1><p>This sheet does not contain access to grades.</p><p>Open this exam’s private instructor link on this device, then scan the sheet again.</p></body></html>`,
+      401,
     );
     securityHeaders(res, true);
     return res;
@@ -385,7 +456,13 @@ app.get("/s/:code", async (c) => {
 
 app.get("/s/:code/api", async (c) => {
   const code = extractSheetLookup(c.req.param("code"));
-  const payload = await loadGradePayload(c.env.DB, code);
+  const row = await c.env.DB
+    .prepare("SELECT exam_id FROM instances WHERE id = ?")
+    .bind(code)
+    .first<{ exam_id: string }>();
+  if (!row) return c.json({ error: "not found" }, 404);
+  if (!(await isAuthorizedGrader(c.env.DB, c.req.raw, row.exam_id))) return gradingUnauthorized(c);
+  const payload = await loadGradePayload(c.env.DB, code, row.exam_id);
   if (!payload) return c.json({ error: "not found" }, 404);
   const res = c.json(payload);
   securityHeaders(res, true);
@@ -394,7 +471,7 @@ app.get("/s/:code/api", async (c) => {
 
 app.post("/s/:code/api/grade", async (c) => {
   const code = extractSheetLookup(c.req.param("code"));
-  let body: { answers: Record<string, string>; status?: string };
+  let body: { answers: Record<string, string>; status?: string; regrade?: boolean };
   try {
     body = await readJsonLimited(c);
   } catch (err) {
@@ -405,6 +482,7 @@ app.post("/s/:code/api/grade", async (c) => {
     .bind(code)
     .first<{ id: string; exam_id: string }>();
   if (!row) return c.json({ error: "not found" }, 404);
+  if (!(await isAuthorizedGrader(c.env.DB, c.req.raw, row.exam_id))) return gradingUnauthorized(c);
   const result = await saveGrade(c.env.DB, row.id, row.exam_id, body);
   if (!result.ok) {
     return c.json({ error: result.error, ...(result.extra ?? {}) }, result.status);
@@ -486,10 +564,10 @@ async function saveGrade(
   db: D1Database,
   id: string,
   examId: string,
-  body: { answers: Record<string, string>; status?: string },
+  body: { answers: Record<string, string>; status?: string; regrade?: boolean },
 ): Promise<
   | { ok: true; body: { score_correct: number; score_pct: number; status: string } }
-  | { ok: false; error: string; status: 400 | 404; extra?: Record<string, unknown> }
+  | { ok: false; error: string; status: 400 | 404 | 409; extra?: Record<string, unknown> }
 > {
   const row = await db
     .prepare("SELECT map_json FROM instances WHERE id = ? AND exam_id = ?")
@@ -507,19 +585,46 @@ async function saveGrade(
   if (!ALLOWED_STATUS.has(status)) {
     return { ok: false, error: "invalid_status", status: 400, extra: { allowed: [...ALLOWED_STATUS] } };
   }
-  await db
-    .prepare(
-      `INSERT INTO grades (instance_id, exam_id, answers_json, score_correct, score_pct, status, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(instance_id) DO UPDATE SET
-         answers_json=excluded.answers_json,
-         score_correct=excluded.score_correct,
-         score_pct=excluded.score_pct,
-         status=excluded.status,
-         updated_at=excluded.updated_at`,
-    )
-    .bind(id, examId, JSON.stringify(scored.canonical), scored.score_correct, scored.score_pct, status)
-    .run();
+  const values = [
+    id,
+    examId,
+    JSON.stringify(scored.canonical),
+    scored.score_correct,
+    scored.score_pct,
+    status,
+  ] as const;
+  if (body.regrade === true) {
+    await db
+      .prepare(
+        `INSERT INTO grades (instance_id, exam_id, answers_json, score_correct, score_pct, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(instance_id) DO UPDATE SET
+           answers_json=excluded.answers_json,
+           score_correct=excluded.score_correct,
+           score_pct=excluded.score_pct,
+           status=excluded.status,
+           updated_at=excluded.updated_at`,
+      )
+      .bind(...values)
+      .run();
+  } else {
+    const inserted = await db
+      .prepare(
+        `INSERT INTO grades (instance_id, exam_id, answers_json, score_correct, score_pct, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(instance_id) DO NOTHING`,
+      )
+      .bind(...values)
+      .run();
+    if ((inserted.meta.changes ?? 0) === 0) {
+      return {
+        ok: false,
+        error: "regrade_confirmation_required",
+        status: 409,
+        extra: { message: "This sheet already has a grade. Confirm regrade to overwrite it." },
+      };
+    }
+  }
   return {
     ok: true,
     body: {

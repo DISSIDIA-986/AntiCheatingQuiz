@@ -190,6 +190,106 @@ async function main() {
   const summary = await poll(evaluate, `summary.textContent.includes("Instances: 5") && summary.textContent`);
   assert(summary.includes("Graded: 0"), "Generated summary is incorrect");
 
+  const instances = await (await fetch(`${baseUrl}${exam.path}/api/instances`)).json();
+  const sheetCode = instances.instances[0].id;
+  const publicSheetApi = `${baseUrl}/s/${sheetCode}/api`;
+  const unauthorizedRead = await fetch(publicSheetApi);
+  assert(unauthorizedRead.status === 401, "A sheet QR alone could read student or grade data");
+  const unauthorizedWrite = await fetch(`${publicSheetApi}/grade`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ answers: {}, status: "ok" }),
+  });
+  assert(unauthorizedWrite.status === 401, "A sheet QR alone could save a grade");
+
+  const authorizedRead = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api`)}).then(async r => ({
+    status: r.status,
+    body: await r.json()
+  }))`);
+  assert(authorizedRead.status === 200 && authorizedRead.body.student_id, "Instructor session could not load a sheet");
+  const answers = Object.fromEntries(authorizedRead.body.questions.map((q) => [q.question_id, "A"]));
+  const firstGrade = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api/grade`)}, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(${JSON.stringify({ answers, status: "ok" })})
+  }).then(async r => ({ status: r.status, body: await r.json() }))`);
+  assert(firstGrade.status === 200, "Authorized instructor could not save the first grade");
+  const blockedRegrade = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api/grade`)}, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(${JSON.stringify({ answers, status: "ok" })})
+  }).then(async r => ({ status: r.status, body: await r.json() }))`);
+  assert(
+    blockedRegrade.status === 409 && blockedRegrade.body.error === "regrade_confirmation_required",
+    "Existing grade could be overwritten without explicit regrade confirmation",
+  );
+  const confirmedRegrade = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api/grade`)}, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(${JSON.stringify({ answers, status: "ok", regrade: true })})
+  }).then(async r => ({ status: r.status, body: await r.json() }))`);
+  assert(confirmedRegrade.status === 200, "Confirmed regrade was rejected");
+
+  const raceSheetCode = instances.instances[1].id;
+  const raceRead = await evaluate(`fetch(${JSON.stringify(`/s/${raceSheetCode}/api`)}).then(r => r.json())`);
+  const raceAnswers = Object.fromEntries(raceRead.questions.map((q) => [q.question_id, "B"]));
+  const raceStatuses = await evaluate(`Promise.all([1, 2].map(() =>
+    fetch(${JSON.stringify(`/s/${raceSheetCode}/api/grade`)}, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(${JSON.stringify({ answers: raceAnswers, status: "ok" })})
+    }).then(r => r.status)
+  ))`);
+  assert(
+    raceStatuses.sort().join(",") === "200,409",
+    `Concurrent first grades were not serialized safely: ${raceStatuses.join(",")}`,
+  );
+
+  const expire = spawnSync(
+    wrangler,
+    [
+      "d1",
+      "execute",
+      "anti-cheating-quiz",
+      "--local",
+      "--persist-to",
+      temp,
+      "--command",
+      "UPDATE grading_sessions SET expires_at = datetime('now', '-1 minute')",
+    ],
+    { cwd: root, env: { ...process.env, CI: "1" }, encoding: "utf8" },
+  );
+  assert(expire.status === 0, `Could not expire grading session:\n${expire.stderr || expire.stdout}`);
+  const expiredRead = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api`)}).then(r => r.status)`);
+  assert(expiredRead === 401, "Expired instructor session could still read a sheet");
+  const expiredWrite = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api/grade`)}, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(${JSON.stringify({ answers, status: "ok", regrade: true })})
+  }).then(r => r.status)`);
+  assert(expiredWrite === 401, "Expired instructor session could still change a grade");
+  await navigate(`${baseUrl}${exam.path}`);
+  const renewedRead = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api`)}).then(r => r.status)`);
+  assert(renewedRead === 200, "Existing exam link did not renew instructor authorization");
+
+  const otherExam = await createExam(baseUrl, "Wrong exam session");
+  await navigate(`${baseUrl}${otherExam.path}`);
+  const crossExamRead = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api`)}).then(r => r.status)`);
+  assert(crossExamRead === 401, "A session for a different exam could read this sheet");
+  await navigate(`${baseUrl}${exam.path}`);
+  const revoke = await evaluate(`fetch(${JSON.stringify(`${exam.path}/api/revoke`)}, {
+    method: "POST"
+  }).then(r => r.status)`);
+  assert(revoke === 200, "Could not revoke test exam");
+  const revokedRead = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api`)}).then(r => r.status)`);
+  assert(revokedRead === 401, "A revoked exam session could still read a sheet");
+  const revokedWrite = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api/grade`)}, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(${JSON.stringify({ answers, status: "ok", regrade: true })})
+  }).then(r => r.status)`);
+  assert(revokedWrite === 401, "A revoked exam session could still change a grade");
+
   const edgeExam = await createExam(baseUrl, "Browser failures");
   await navigate(`${baseUrl}${edgeExam.path}`);
   await evaluate(`(() => {
@@ -270,7 +370,7 @@ async function main() {
   assert(fullSummary.instances === 40 && fullSummary.graded === 0, "40-student summary is incorrect");
 
   browser.socket.close();
-  console.log("E2E passed: desktop/mobile UI, real ZIP generation, failures, cancellation, XSS safety, and 40-student load.");
+  console.log("E2E passed: grading authorization/expiry/regrades, desktop/mobile UI, ZIP generation, failures, cancellation, XSS safety, and 40-student load.");
 }
 
 main()

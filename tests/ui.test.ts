@@ -48,4 +48,9 @@ describe("desktop authoring UI", () => {
   it("does not trigger a missing favicon request", () => {
     expect(html).toContain('<link rel="icon" href="data:,"');
   });
+
+  it("preserves lowercase legacy sheet IDs pasted from historical QR URLs", () => {
+    expect(html).toContain("rawCode.toLowerCase()");
+    expect(html).toContain("/^[0-9a-fA-F]{32}$/.test(rawCode)");
+  });
 });

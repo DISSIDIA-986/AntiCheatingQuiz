@@ -155,7 +155,7 @@ export function examAppHtml(token: string): string {
   <header>
     <h1>AntiCheatingQuiz</h1>
     <p class="sub">Create personalized paper exams on your computer, print them, then <strong>scan each sheet’s QR with your phone</strong> to grade. Prototype — not a Scantron replacement.</p>
-    <p class="warn-banner"><strong>Privacy:</strong> Anyone with this secret link can view student names/IDs, change grades, and download results. Use sample/fake data unless you accept that risk. Do not post the link publicly.</p>
+    <p class="warn-banner"><strong>Privacy:</strong> This private instructor link can view student names/IDs, grade sheets, and download results. Open it once on your phone before scanning sheet QRs, and do not share it with students.</p>
     <p class="nav"><a href="/e/${token}/help">How to use (Help)</a></p>
   </header>
   <main>
@@ -190,7 +190,7 @@ export function examAppHtml(token: string): string {
     </section>
     <section>
       <h2>2. Grade on your phone</h2>
-      <p class="sub"><strong>Normal path:</strong> open the iPhone Camera (or any QR app), point at the sheet’s QR → Safari opens a grading page for that student → tap the bubbles you see on paper → Save. No copy/paste needed.</p>
+      <p class="sub"><strong>Normal path:</strong> first open this private exam link on your phone. For the next 12 hours, use the iPhone Camera (or any QR app), point at each sheet’s QR → Safari opens its grading page → tap the bubbles → Save. A sheet QR alone cannot show or change grades.</p>
       <p class="sub">Use the tools below only if the camera link fails (fallback on this computer).</p>
       <label for="photo">Sheet photo (optional fallback)</label>
       <input id="photo" type="file" accept="image/*" capture="environment" />
@@ -375,6 +375,13 @@ export function examAppHtml(token: string): string {
             throw new Error("Tick “I checked this sheet against the paper” before saving.");
           }
           let status = "ok";
+          let regrade = false;
+          if (data.grade) {
+            regrade = window.confirm(
+              "This sheet already has a saved grade. Overwrite it with these answers?\\n\\nOK = regrade, Cancel = keep the existing grade",
+            );
+            if (!regrade) return;
+          }
           if (blank > 0) {
             const proceed = window.confirm(
               blank + " question(s) are blank (score as wrong). Save as needs_review?\\n\\nOK = needs_review, Cancel = abort",
@@ -385,7 +392,7 @@ export function examAppHtml(token: string): string {
           const r = await fetch(base + "/api/instances/" + encodeURIComponent(id) + "/grade", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ answers, status }),
+            body: JSON.stringify({ answers, status, regrade }),
           });
           if (!r.ok) throw new Error(await r.text());
           const out = await r.json();
@@ -402,7 +409,10 @@ export function examAppHtml(token: string): string {
     function extractLookup(raw) {
       const t = String(raw || "").trim();
       const m = t.match(/\\/s\\/([0-9A-Za-z-]{8,48})/i);
-      if (m) return m[1].toUpperCase().replace(/[^0-9A-Z]/g, "");
+      if (m) {
+        const rawCode = m[1].replace(/[^0-9A-Za-z]/g, "");
+        return /^[0-9a-fA-F]{32}$/.test(rawCode) ? rawCode.toLowerCase() : rawCode.toUpperCase();
+      }
       return t.toUpperCase().replace(/[^0-9A-Z]/g, "") || t;
     }
 
@@ -641,6 +651,13 @@ export function sheetGradeHtml(code: string): string {
           if (!v) blank++;
         });
         let status = "ok";
+        let regrade = false;
+        if (data.grade) {
+          regrade = window.confirm(
+            "This sheet already has a saved grade. Overwrite it with these answers?\\n\\nOK = regrade, Cancel = keep the existing grade",
+          );
+          if (!regrade) return;
+        }
         if (blank > 0) {
           const proceed = window.confirm(
             blank + " blank answer(s) will score as wrong. Save as needs review?\\n\\nOK = save, Cancel = go back",
@@ -651,7 +668,7 @@ export function sheetGradeHtml(code: string): string {
         const r = await fetch(api + "/grade", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ answers, status }),
+          body: JSON.stringify({ answers, status, regrade }),
         });
         if (!r.ok) throw new Error(await r.text());
         const out = await r.json();

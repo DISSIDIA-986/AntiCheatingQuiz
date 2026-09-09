@@ -1,3 +1,16 @@
+# Instructor authorization and existing links
+
+Printed sheet QR codes are identifiers, not credentials. A QR by itself cannot load
+student details, scores, answers, or save a grade. Before scanning sheets, open the
+exam's existing private `/e/...` instructor link on the grading phone. This creates
+an exam-scoped, HttpOnly session that expires after 12 hours.
+
+Existing exam links and historical database records remain compatible: opening an
+old, non-revoked exam link creates a fresh grading session, and its existing sheet
+QR codes continue to work for that authorized device. Revoked exam links cannot
+create sessions. Regenerated/deleted sheet codes remain invalid. Replacing an
+existing grade requires an explicit regrade confirmation.
+
 # AntiCheatingQuiz
 
 Personalized paper MCQ exams for in-person classes: same 10 stems, number variants, shuffled order/options, QR per student, phone/web grading (manual bubbles), class CSV export.
