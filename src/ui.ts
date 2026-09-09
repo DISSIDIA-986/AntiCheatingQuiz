@@ -195,7 +195,7 @@ export function examAppHtml(token: string): string {
     </section>
     <section>
       <h2>2. Grade on your phone</h2>
-      <p class="sub"><strong>Normal path:</strong> first open this private exam link on your phone. For the next 12 hours, use the iPhone Camera (or any QR app), point at each sheet’s QR → Safari opens its grading page → tap the bubbles → Save. A sheet QR alone cannot show or change grades.</p>
+      <p class="sub"><strong>Normal path:</strong> on your phone, open this private exam link once (bookmark it). Then scan each sheet’s QR with Camera → grade → Save. If Camera opens a “sign-in” page, paste this same private link there and continue. A sheet QR alone cannot show or change grades.</p>
       <p class="sub">Use the tools below only if the camera link fails (fallback on this computer).</p>
       <label for="photo">Sheet photo (optional fallback)</label>
       <input id="photo" type="file" accept="image/*" capture="environment" />
@@ -490,6 +490,100 @@ export function examAppHtml(token: string): string {
         .replace(/'/g, "&#39;");
     }
     refreshSummary();
+  </script>
+</body>
+</html>`;
+}
+
+/** Shown when a sheet QR is scanned before the instructor opens the private exam link on this device. */
+export function instructorGateHtml(resumePath: string): string {
+  const resume = JSON.stringify(resumePath);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <link rel="icon" href="data:," />
+  <title>Open your exam link</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      color: #1c2430;
+      background: linear-gradient(180deg, #f7f2e8 0%, #f3efe6 100%);
+      min-height: 100vh;
+      padding: 1.25rem;
+    }
+    main { max-width: 26rem; margin: 0 auto; }
+    h1 { color: #0f5c4c; font-size: 1.35rem; margin: 0 0 0.5rem; }
+    p { line-height: 1.45; margin: 0 0 0.85rem; }
+    label { display: block; font-weight: 600; margin: 1rem 0 0.35rem; }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0.75rem 0.7rem;
+      font-size: 1rem;
+      border: 1px solid #d5cbb8;
+      border-radius: 6px;
+    }
+    button {
+      width: 100%;
+      margin-top: 0.85rem;
+      background: #0f5c4c;
+      color: #f7fff9;
+      border: 0;
+      padding: 0.9rem 1rem;
+      font: 700 1.05rem/1 "Avenir Next", "Segoe UI", sans-serif;
+      border-radius: 8px;
+    }
+    .hint { font-size: 0.9rem; opacity: 0.85; }
+    .err { color: #8a3b12; margin-top: 0.75rem; white-space: pre-wrap; }
+    ol { padding-left: 1.2rem; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>One quick step</h1>
+    <p>This QR identifies the student sheet. Grades stay locked until you unlock grading on <strong>this phone</strong>.</p>
+    <ol>
+      <li>Paste the private exam link you were sent (it looks like <code>…/e/…</code>).</li>
+      <li>Tap Continue — we unlock grading, then take you back to this sheet.</li>
+    </ol>
+    <label for="examLink">Private exam link</label>
+    <input id="examLink" type="url" inputmode="url" autocomplete="off" placeholder="https://…/e/your-secret-link" />
+    <button id="btnGo" type="button">Continue to this sheet</button>
+    <p id="err" class="err" hidden></p>
+    <p class="hint">Tip: after this once, Camera scans work for about 12 hours on this phone. Do not share the private link with students.</p>
+  </main>
+  <script>
+    const RESUME = ${resume};
+    const err = document.getElementById("err");
+    function showError(text) {
+      err.hidden = false;
+      err.textContent = text;
+    }
+    document.getElementById("btnGo").onclick = () => {
+      err.hidden = true;
+      const raw = document.getElementById("examLink").value.trim();
+      if (!raw) return showError("Paste your private exam link first.");
+      let url;
+      try { url = new URL(raw); } catch {
+        return showError("That does not look like a full link. Paste the whole https://…/e/… URL.");
+      }
+      if (url.origin !== location.origin) {
+        return showError("Use the exam link for this same website (copy it from your email or bookmark).");
+      }
+      const m = url.pathname.match(/^\\/e\\/([0-9a-fA-F]{32})\\/?$/);
+      if (!m) {
+        return showError("The link should look like …/e/ followed by a long secret code.");
+      }
+      url.pathname = "/e/" + m[1];
+      url.search = "";
+      url.searchParams.set("resume", RESUME);
+      url.hash = "";
+      location.href = url.toString();
+    };
   </script>
 </body>
 </html>`;
@@ -932,11 +1026,12 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
   <section class="s-grade">
     <h2>Step 3 — Grade (phone)</h2>
     <ul>
-      <li><k class="kb">Easiest:</k> open the <k class="kb">iPhone Camera</k> (or any QR app) and point at the sheet’s <k class="kb">QR code</k>.</li>
-      <li>A link opens in Safari — that page is <k class="kb">only for that student</k>.</li>
-      <li>Tap the answers you see bubbled on the paper → tick “I checked…” → <k class="kb">Save grade</k>.</li>
-      <li>Close the tab and scan the next sheet. Repeat until done.</li>
-      <li>Fallback (if camera fails): on your computer exam page, type the short code printed under the QR (like <code>7K4M-2Q8R-XP6T</code>).</li>
+      <li><k class="kb">Once per phone:</k> open your <k class="kr">private exam link</k> in Safari (the one you were sent). Bookmark it.</li>
+      <li>Then open the <k class="kb">iPhone Camera</k> and point at each sheet’s <k class="kb">QR code</k>.</li>
+      <li>Safari opens that student’s grading page → tap the bubbled answers → <k class="kb">Save grade</k>.</li>
+      <li>Close the tab and scan the next sheet. The private-link step lasts about 12 hours on that phone.</li>
+      <li>If you scan first and see “Instructor sign-in”: paste your private exam link into the box, tap Continue, then you land back on the sheet.</li>
+      <li>Fallback: on your computer exam page, type the short code under the QR (like <code>7K4M-2Q8R-XP6T</code>).</li>
     </ul>
   </section>
 
@@ -955,6 +1050,7 @@ export function helpHtml(opts: { backHref?: string } = {}): string {
       <li><k class="kr">“Bank invalid”</k> — need exactly 10 questions; column names must match the sample.</li>
       <li><k class="kr">“Roster invalid”</k> — every row needs a name and a unique student ID; max about 50 students.</li>
       <li><k class="kr">“Shorten question text”</k> — too long for one page; shorten and generate again.</li>
+      <li><k class="kr">“Instructor sign-in required”</k> — paste your private exam link into the box on that page (or open it in Safari first), then scan again.</li>
       <li><k class="kr">QR not opening a page</k> — the QR must be from a newly generated ZIP (old prints only had a long ID). Reprint after updating, or type the short code under the QR.</li>
       <li><k class="kr">Lost the secret link</k> — ask your helper for a new link; do not share the old one widely.</li>
     </ul>

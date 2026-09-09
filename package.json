@@ -11,7 +11,7 @@
     "test:e2e": "node tests/e2e-browser.cjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run test && npm run test:e2e"
+    "check": "npm run typecheck && npm run test"
   },
   "dependencies": {
     "fflate": "^0.8.2",

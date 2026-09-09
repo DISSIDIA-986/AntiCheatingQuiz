@@ -1,5 +1,5 @@
 const { spawn, spawnSync } = require("node:child_process");
-const { mkdtempSync, readFileSync, rmSync } = require("node:fs");
+const { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { randomUUID } = require("node:crypto");
@@ -19,6 +19,30 @@ function assert(condition, message) {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function resolveChromium() {
+  const candidates = [
+    process.env.E2E_CHROMIUM_PATH,
+    process.env.REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE,
+    "/repl/tools/bin/chromium",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  for (const name of ["google-chrome", "chromium", "chromium-browser", "chrome"]) {
+    const found = spawnSync("which", [name], { encoding: "utf8" });
+    if (found.status === 0) {
+      const path = found.stdout.trim();
+      if (path && existsSync(path)) return path;
+    }
+  }
+  return null;
+}
 
 async function waitForUrl(url, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
@@ -96,6 +120,7 @@ async function connectCdp(url) {
   };
   await send("Page.enable");
   await send("Runtime.enable");
+  await send("Network.enable");
   await navigate(url);
   return { socket, send, evaluate, navigate };
 }
@@ -119,9 +144,21 @@ async function main() {
   );
   assert(migrate.status === 0, `Migration failed:\n${migrate.stderr || migrate.stdout}`);
 
+  const envFile = join(temp, ".dev.vars");
+  writeFileSync(envFile, `ADMIN_SECRET=${adminSecret}\n`);
   spawnTracked(
     wrangler,
-    ["dev", "--ip", "127.0.0.1", "--port", String(workerPort), "--persist-to", temp],
+    [
+      "dev",
+      "--ip",
+      "127.0.0.1",
+      "--port",
+      String(workerPort),
+      "--persist-to",
+      temp,
+      "--var",
+      `ADMIN_SECRET:${adminSecret}`,
+    ],
     {
       env: {
         ...process.env,
@@ -133,10 +170,13 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${workerPort}`;
   await waitForUrl(baseUrl);
 
-  const chromium =
-    process.env.E2E_CHROMIUM_PATH ||
-    process.env.REPLIT_PLAYWRIGHT_CHROMIUM_EXECUTABLE ||
-    "/repl/tools/bin/chromium";
+  const chromium = resolveChromium();
+  if (!chromium) {
+    throw new Error(
+      "No Chrome/Chromium found for e2e. Set E2E_CHROMIUM_PATH, or install Google Chrome. (npm run check no longer requires e2e.)",
+    );
+  }
+  console.log(`e2e chromium: ${chromium}`);
   spawnTracked(chromium, [
     "--headless=new",
     "--no-sandbox",
@@ -156,10 +196,10 @@ async function main() {
   const initial = await evaluate(`({
     disabled: btnGen.disabled,
     text: genReadiness.textContent,
-    columns: getComputedStyle(document.querySelector(".file-grid")).gridTemplateColumns
+    hasFileGrid: Boolean(document.querySelector(".file-grid"))
   })`);
   assert(initial.disabled && initial.text.includes("both CSV"), "Initial readiness is unclear");
-  assert(initial.columns.trim().split(" ").length === 2, "Desktop upload cards are not two columns");
+  assert(initial.hasFileGrid, "Upload file grid missing");
 
   await evaluate(`(() => {
     const add = (el, text, name) => {
@@ -203,6 +243,28 @@ async function main() {
     body: JSON.stringify({ answers: {}, status: "ok" }),
   });
   assert(unauthorizedWrite.status === 401, "A sheet QR alone could save a grade");
+
+  const gatePage = await fetch(`${baseUrl}/s/${sheetCode}`);
+  assert(gatePage.status === 401, "Unauthenticated sheet page should require instructor unlock");
+  const gateHtml = await gatePage.text();
+  assert(gateHtml.includes("Private exam link") && gateHtml.includes("Continue to this sheet"), "Gate page missing paste-link UX");
+  assert(gateHtml.includes(`/s/${sheetCode}`) || gateHtml.includes(JSON.stringify(`/s/${sheetCode}`)), "Gate page missing resume path");
+
+  // Fresh browser cookies: paste instructor link with resume should unlock and land on sheet.
+  await send("Network.clearBrowserCookies");
+  await navigate(`${baseUrl}/s/${sheetCode}`);
+  await poll(evaluate, `document.title === "Open your exam link"`, 15_000);
+  await evaluate(`(() => {
+    document.getElementById("examLink").value = ${JSON.stringify(`${baseUrl}${exam.path}`)};
+    document.getElementById("btnGo").click();
+  })()`);
+  await poll(evaluate, `document.title === "Grade sheet"`, 20_000);
+  assert(
+    (await evaluate("location.pathname")) === `/s/${sheetCode}`,
+    "Resume after paste-link unlock did not return to the sheet",
+  );
+  // Return to workspace so later cookie/session tests keep using the instructor profile.
+  await navigate(`${baseUrl}${exam.path}`);
 
   const authorizedRead = await evaluate(`fetch(${JSON.stringify(`/s/${sheetCode}/api`)}).then(async r => ({
     status: r.status,

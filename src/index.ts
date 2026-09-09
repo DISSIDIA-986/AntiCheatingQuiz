@@ -7,7 +7,7 @@ import { safeFilename, zipPdfs } from "./lib/zip";
 import { toCsv } from "./lib/csv";
 import { getTemplate, csvDownloadResponse } from "./lib/templates";
 import { extractSheetLookup, randomSheetCode, sheetGradePath } from "./lib/sheet-code";
-import { examAppHtml, homeHtml, helpHtml, sheetGradeHtml } from "./ui";
+import { examAppHtml, homeHtml, helpHtml, sheetGradeHtml, instructorGateHtml } from "./ui";
 
 export type Env = {
   DB: D1Database;
@@ -146,7 +146,8 @@ async function examWorkspaceResponse(c: ExamContext): Promise<Response> {
       "INSERT INTO grading_sessions (token_hash, exam_id, expires_at) VALUES (?, ?, datetime('now', '+12 hours'))",
     ).bind(tokenHash, exam.id),
   ]);
-  const response = await c.html(examAppHtml(c.get("token")));
+  const resume = safeResumePath(c.req.query("resume") ?? "");
+  const response = resume ? c.redirect(resume, 302) : await c.html(examAppHtml(c.get("token")));
   const secure = new URL(c.req.url).protocol === "https:" ? "; Secure" : "";
   response.headers.append(
     "Set-Cookie",
@@ -440,6 +441,21 @@ function readCookie(request: Request, name: string): string {
   return "";
 }
 
+/** Only allow same-origin sheet resume paths (open-redirect safe). */
+function safeResumePath(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("/s/")) return null;
+  if (trimmed.includes("://") || trimmed.includes("//") || trimmed.includes("\\")) return null;
+  try {
+    const url = new URL(trimmed, "https://example.invalid");
+    if (url.origin !== "https://example.invalid") return null;
+    if (!/^\/s\/[0-9A-Za-z-]{8,48}\/?$/.test(url.pathname)) return null;
+    return url.pathname.replace(/\/$/, "") || null;
+  } catch {
+    return null;
+  }
+}
+
 async function isAuthorizedGrader(db: D1Database, request: Request, examId: string): Promise<boolean> {
   const token = readCookie(request, GRADING_SESSION_COOKIE);
   if (!token) return false;
@@ -485,10 +501,7 @@ app.get("/s/:code", async (c) => {
     return res;
   }
   if (!(await isAuthorizedGrader(c.env.DB, c.req.raw, row.exam_id))) {
-    const res = c.html(
-      `<!DOCTYPE html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="referrer" content="no-referrer"/><title>Instructor sign-in required</title></head><body style="font-family:system-ui;padding:1.5rem;max-width:28rem"><h1>Instructor sign-in required</h1><p>This sheet does not contain access to grades.</p><p>Open this exam’s private instructor link on this device, then scan the sheet again.</p></body></html>`,
-      401,
-    );
+    const res = c.html(instructorGateHtml(`/s/${row.id}`), 401);
     securityHeaders(res, true);
     return res;
   }

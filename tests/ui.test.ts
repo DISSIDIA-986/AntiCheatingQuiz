@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { examAppHtml } from "../src/ui";
+import { examAppHtml, instructorGateHtml } from "../src/ui";
 
 describe("desktop authoring UI", () => {
   const html = examAppHtml("test-token");
@@ -53,5 +53,16 @@ describe("desktop authoring UI", () => {
   it("preserves lowercase legacy sheet IDs pasted from historical QR URLs", () => {
     expect(html).toContain("rawCode.toLowerCase()");
     expect(html).toContain("/^[0-9a-fA-F]{32}$/.test(rawCode)");
+  });
+});
+describe("instructor gate UI", () => {
+  const gate = instructorGateHtml("/s/7K4M2Q8RXP6T");
+
+  it("lets the instructor paste the private exam link and resume the sheet", () => {
+    expect(gate).toContain("Private exam link");
+    expect(gate).toContain("Continue to this sheet");
+    expect(gate).toContain('"/s/7K4M2Q8RXP6T"');
+    expect(gate).toContain("searchParams.set");
+    expect(gate).toContain("resume");
   });
 });
