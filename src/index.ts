@@ -174,98 +174,113 @@ e.post("/api/generate", async (c) => {
     return c.json({ error: "payload_too_large" }, 400);
   }
 
-  const existing = await c.env.DB
-    .prepare("SELECT COUNT(*) AS n FROM instances WHERE exam_id = ?")
-    .bind(exam.id)
-    .first<{ n: number }>();
-  if ((existing?.n ?? 0) > 0 && !body.force) {
+  const lockToken = await claimGenerateLock(c.env.DB, exam.id);
+  if (!lockToken) {
     return c.json(
       {
-        error: "already_generated",
-        message:
-          "Papers already exist for this exam. Regenerating deletes grades and creates NEW QR codes — already-printed sheets will no longer match. Pass force=true only after confirming, or create a new exam link.",
-        instances: existing?.n ?? 0,
+        error: "generate_in_progress",
+        message: "Another generate request is still running for this exam. Wait a moment and try again.",
       },
       409,
     );
   }
 
-  const bank = validateBankCsv(body.bankCsv ?? "");
-  if (!bank.ok) return c.json({ error: "bank_invalid", issues: bank.issues }, 400);
-  const roster = validateRosterCsv(body.rosterCsv ?? "");
-  if (!roster.ok) return c.json({ error: "roster_invalid", issues: roster.issues }, 400);
-
-  const generationId = randomToken();
-  let sheetCodes: string[];
   try {
-    sheetCodes = await mintUniqueSheetCodes(c.env.DB, roster.students.length);
-  } catch (err) {
-    return c.json({ error: "generate_failed", message: err instanceof Error ? err.message : String(err) }, 500);
-  }
-  let codeIdx = 0;
-  let instances: ExamInstanceMap[];
-  try {
-    instances = generateInstances(
-      bank.questions,
-      roster.students,
-      exam.id,
-      generationId,
-      () => sheetCodes[codeIdx++]!,
-    );
-  } catch (err) {
-    return c.json({ error: "generate_failed", message: err instanceof Error ? err.message : String(err) }, 400);
-  }
-
-  const origin = new URL(c.req.url).origin;
-  // Build ALL PDFs before touching existing exam rows (atomic replace).
-  const files: Array<{ name: string; bytes: Uint8Array }> = [];
-  for (const inst of instances) {
-    try {
-      const gradeUrl = `${origin}${sheetGradePath(inst.instance_id)}`;
-      const pdf = await buildExamPdf(inst, { gradeUrl });
-      files.push({ name: safeFilename(inst.student_name, inst.student_id, inst.instance_id), bytes: pdf });
-    } catch (err) {
+    const existing = await c.env.DB
+      .prepare("SELECT COUNT(*) AS n FROM instances WHERE exam_id = ?")
+      .bind(exam.id)
+      .first<{ n: number }>();
+    if ((existing?.n ?? 0) > 0 && !body.force) {
       return c.json(
-        { error: "pdf_failed", message: err instanceof Error ? err.message : String(err) },
-        400,
+        {
+          error: "already_generated",
+          message:
+            "Papers already exist for this exam. Regenerating deletes grades and creates NEW QR codes — already-printed sheets will no longer match. Pass force=true only after confirming, or create a new exam link.",
+          instances: existing?.n ?? 0,
+        },
+        409,
       );
     }
-  }
 
-  const stmts = [
-    c.env.DB.prepare("DELETE FROM grades WHERE exam_id = ?").bind(exam.id),
-    c.env.DB.prepare("DELETE FROM instances WHERE exam_id = ?").bind(exam.id),
-    ...instances.map((inst) =>
+    const bank = validateBankCsv(body.bankCsv ?? "");
+    if (!bank.ok) return c.json({ error: "bank_invalid", issues: bank.issues }, 400);
+    const roster = validateRosterCsv(body.rosterCsv ?? "");
+    if (!roster.ok) return c.json({ error: "roster_invalid", issues: roster.issues }, 400);
+
+    const generationId = randomToken();
+    let sheetCodes: string[];
+    try {
+      sheetCodes = await mintUniqueSheetCodes(c.env.DB, roster.students.length);
+    } catch (err) {
+      return c.json({ error: "generate_failed", message: err instanceof Error ? err.message : String(err) }, 500);
+    }
+    let codeIdx = 0;
+    let instances: ExamInstanceMap[];
+    try {
+      instances = generateInstances(
+        bank.questions,
+        roster.students,
+        exam.id,
+        generationId,
+        () => sheetCodes[codeIdx++]!,
+      );
+    } catch (err) {
+      return c.json({ error: "generate_failed", message: err instanceof Error ? err.message : String(err) }, 400);
+    }
+
+    const origin = new URL(c.req.url).origin;
+    // Build ALL PDFs before touching existing exam rows (atomic replace).
+    const files: Array<{ name: string; bytes: Uint8Array }> = [];
+    for (const inst of instances) {
+      try {
+        const gradeUrl = `${origin}${sheetGradePath(inst.instance_id)}`;
+        const pdf = await buildExamPdf(inst, { gradeUrl });
+        files.push({ name: safeFilename(inst.student_name, inst.student_id, inst.instance_id), bytes: pdf });
+      } catch (err) {
+        return c.json(
+          { error: "pdf_failed", message: err instanceof Error ? err.message : String(err) },
+          400,
+        );
+      }
+    }
+
+    const stmts = [
+      c.env.DB.prepare("DELETE FROM grades WHERE exam_id = ?").bind(exam.id),
+      c.env.DB.prepare("DELETE FROM instances WHERE exam_id = ?").bind(exam.id),
+      ...instances.map((inst) =>
+        c.env.DB.prepare(
+          "INSERT INTO issued_instance_ids (instance_id) VALUES (?)",
+        ).bind(inst.instance_id),
+      ),
+      ...instances.map((inst) =>
+        c.env.DB.prepare(
+          "INSERT INTO instances (id, exam_id, student_name, student_id, map_json) VALUES (?, ?, ?, ?, ?)",
+        ).bind(inst.instance_id, exam.id, inst.student_name, inst.student_id, JSON.stringify(inst)),
+      ),
       c.env.DB.prepare(
-        "INSERT INTO issued_instance_ids (instance_id) VALUES (?)",
-      ).bind(inst.instance_id),
-    ),
-    ...instances.map((inst) =>
-      c.env.DB.prepare(
-        "INSERT INTO instances (id, exam_id, student_name, student_id, map_json) VALUES (?, ?, ?, ?, ?)",
-      ).bind(inst.instance_id, exam.id, inst.student_name, inst.student_id, JSON.stringify(inst)),
-    ),
-    c.env.DB.prepare(
-      `INSERT INTO exam_payloads (exam_id, bank_json, roster_json, generated_at)
+        `INSERT INTO exam_payloads (exam_id, bank_json, roster_json, generated_at)
        VALUES (?, ?, ?, datetime('now'))
        ON CONFLICT(exam_id) DO UPDATE SET bank_json=excluded.bank_json, roster_json=excluded.roster_json, generated_at=excluded.generated_at`,
-    ).bind(
-      exam.id,
-      JSON.stringify({ generation_id: generationId, questions: bank.questions }),
-      JSON.stringify(roster.students),
-    ),
-  ];
-  await c.env.DB.batch(stmts);
+      ).bind(
+        exam.id,
+        JSON.stringify({ generation_id: generationId, questions: bank.questions }),
+        JSON.stringify(roster.students),
+      ),
+    ];
+    await c.env.DB.batch(stmts);
 
-  const zip = zipPdfs(files);
-  return new Response(zip, {
-    headers: {
-      "content-type": "application/zip",
-      "content-disposition": 'attachment; filename="exam-sheets.zip"',
-      "referrer-policy": "no-referrer",
-      "cache-control": "no-store, private",
-    },
-  });
+    const zip = zipPdfs(files);
+    return new Response(zip, {
+      headers: {
+        "content-type": "application/zip",
+        "content-disposition": 'attachment; filename="exam-sheets.zip"',
+        "referrer-policy": "no-referrer",
+        "cache-control": "no-store, private",
+      },
+    });
+  } finally {
+    await releaseGenerateLock(c.env.DB, exam.id, lockToken);
+  }
 });
 
 e.get("/api/exam-sheets.pdf", async (c) => {
@@ -453,6 +468,38 @@ function safeResumePath(raw: string): string | null {
   } catch {
     return null;
   }
+}
+
+const GENERATE_LOCK_STALE_MINUTES = 3;
+
+async function claimGenerateLock(db: D1Database, examId: string): Promise<string | null> {
+  const lockToken = randomToken();
+  await db
+    .prepare(
+      `DELETE FROM exam_generate_locks
+       WHERE exam_id = ? AND locked_at <= datetime('now', ?)`,
+    )
+    .bind(examId, `-${GENERATE_LOCK_STALE_MINUTES} minutes`)
+    .run();
+  try {
+    await db
+      .prepare(
+        `INSERT INTO exam_generate_locks (exam_id, lock_token, locked_at)
+         VALUES (?, ?, datetime('now'))`,
+      )
+      .bind(examId, lockToken)
+      .run();
+    return lockToken;
+  } catch {
+    return null;
+  }
+}
+
+async function releaseGenerateLock(db: D1Database, examId: string, lockToken: string): Promise<void> {
+  await db
+    .prepare("DELETE FROM exam_generate_locks WHERE exam_id = ? AND lock_token = ?")
+    .bind(examId, lockToken)
+    .run();
 }
 
 async function isAuthorizedGrader(db: D1Database, request: Request, examId: string): Promise<boolean> {

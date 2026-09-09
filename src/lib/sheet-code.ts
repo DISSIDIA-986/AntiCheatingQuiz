@@ -60,3 +60,19 @@ export function randomSheetCode(length = SHEET_CODE_LEN): string {
 export function sheetGradePath(code: string): string {
   return `/s/${normalizeSheetCode(code)}`;
 }
+
+/**
+ * Same-origin `/s/<code>` path only — never return an absolute URL that could
+ * open-redirect the instructor workspace to an attacker host.
+ */
+export function sameOriginSheetPath(raw: string, origin: string): string | null {
+  try {
+    const base = new URL(origin);
+    const url = new URL(String(raw).trim(), base);
+    if (url.origin !== base.origin) return null;
+    if (!/^\/s\/[0-9A-Za-z-]{8,48}\/?$/i.test(url.pathname)) return null;
+    return url.pathname.replace(/\/$/, "") || null;
+  } catch {
+    return null;
+  }
+}

@@ -265,6 +265,9 @@ export function examAppHtml(token: string): string {
       if (err && err.error === "already_generated") {
         return "<strong>Exam sheets already exist.</strong><p>To keep current grades and printed QR codes, stop here. To start over, select “Replace existing papers,” then try again.</p>";
       }
+      if (err && err.error === "generate_in_progress") {
+        return "<strong>Generation already running.</strong><p>Another create request is still finishing for this exam. Wait a few seconds, then try again.</p>";
+      }
       const message = err && (err.message || err.error);
       return "<strong>We could not create the exam sheets.</strong><p>" +
         escapeHtml(String(message || "Please check both CSV files and try again.")) + "</p>";
@@ -324,9 +327,10 @@ export function examAppHtml(token: string): string {
       box.innerHTML = "";
       const id = extractLookup(raw);
       if (!id) throw new Error("Enter a sheet code");
-      // If QR decoded to a grade URL, jump there (same as phone camera).
-      if (/^https?:\\/\\//i.test(String(raw).trim()) && /\\/s\\//i.test(String(raw))) {
-        location.href = String(raw).trim();
+      // If QR decoded to a same-origin grade URL, jump there (phone-like). Never follow off-site /s/ hosts.
+      const sheetPath = sameOriginSheetPath(String(raw).trim());
+      if (sheetPath) {
+        location.href = sheetPath;
         return;
       }
       const res = await fetch(base + "/api/instances/" + encodeURIComponent(id));
@@ -410,6 +414,17 @@ export function examAppHtml(token: string): string {
       };
       box.appendChild(save);
       setMsg(msg, data.grade ? "Sheet loaded with prior answers. Edit and save." : "Sheet loaded. Select bubbles and save.", true);
+    }
+
+    function sameOriginSheetPath(raw) {
+      try {
+        const u = new URL(String(raw || "").trim(), location.origin);
+        if (u.origin !== location.origin) return null;
+        if (!/^\\/s\\/[0-9A-Za-z-]{8,48}\\/?$/i.test(u.pathname)) return null;
+        return u.pathname.replace(/\\/$/, "") || null;
+      } catch (_) {
+        return null;
+      }
     }
 
     function extractLookup(raw) {

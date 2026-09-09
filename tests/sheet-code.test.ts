@@ -5,6 +5,7 @@ import {
   isValidSheetCode,
   normalizeSheetCode,
   randomSheetCode,
+  sameOriginSheetPath,
 } from "../src/lib/sheet-code";
 
 describe("sheet-code", () => {
@@ -33,5 +34,14 @@ describe("sheet-code", () => {
     const id = randomSheetCode();
     expect(isValidSheetCode(id)).toBe(true);
     expect(id).toHaveLength(12);
+  });
+
+  it("only navigates to same-origin sheet paths", () => {
+    const origin = "https://anti-cheating-quiz.example.workers.dev";
+    expect(sameOriginSheetPath(`${origin}/s/7K4M2Q8RXP6T`, origin)).toBe("/s/7K4M2Q8RXP6T");
+    expect(sameOriginSheetPath("/s/7K4M2Q8RXP6T", origin)).toBe("/s/7K4M2Q8RXP6T");
+    expect(sameOriginSheetPath("https://evil.example/s/7K4M2Q8RXP6T", origin)).toBeNull();
+    expect(sameOriginSheetPath("https://evil.example/phish?x=/s/x", origin)).toBeNull();
+    expect(sameOriginSheetPath(`${origin}/e/token`, origin)).toBeNull();
   });
 });

@@ -54,6 +54,13 @@ describe("desktop authoring UI", () => {
     expect(html).toContain("rawCode.toLowerCase()");
     expect(html).toContain("/^[0-9a-fA-F]{32}$/.test(rawCode)");
   });
+
+  it("never open-redirects QR decode to an off-site /s/ host", () => {
+    expect(html).toContain("function sameOriginSheetPath(raw)");
+    expect(html).toContain("u.origin !== location.origin");
+    expect(html).toContain("location.href = sheetPath");
+    expect(html).not.toContain("location.href = String(raw).trim()");
+  });
 });
 describe("instructor gate UI", () => {
   const gate = instructorGateHtml("/s/7K4M2Q8RXP6T");
