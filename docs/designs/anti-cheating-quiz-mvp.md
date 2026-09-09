@@ -8,9 +8,9 @@ Mode: Builder
 
 ## Problem Statement
 
-the instructor (university business school) needs an in-person paper MCQ exam that is harder to share via class Instagram (e.g. bathroom posts of “Q3 = B”). He wants one-page **personalized exam sheets** (question text + bubbles on the same Letter page) with QR, shuffled order/options, number-only variants inside questions, phone bubble scan, and class CSV export.
+An instructor (university business school) needs an in-person paper MCQ exam that is harder to share via class Instagram (e.g. bathroom posts of “Q3 = B”). He wants one-page **personalized exam sheets** (question text + bubbles on the same Letter page) with QR, shuffled order/options, number-only variants inside questions, phone bubble scan, and class CSV export.
 
-Provenance: instructor feedback answers instructor questions (self-made bank, 10 MCQ, numbers only, phone bubbles, prototype desktop CSV, ~40 students; columns name, id, answers-by-question).
+Provenance: instructor Q&A (self-reported requirements) (self-made bank, 10 MCQ, numbers only, phone bubbles, prototype desktop CSV, ~40 students; columns name, id, answers-by-question).
 
 ## What Makes This Cool
 
@@ -18,7 +18,7 @@ Same 10 stems, different numbers and different A–D mappings per student — so
 
 ## Constraints
 
-- Side project for the instructor review, not a startup platform
+- Side project for instructor review, not a startup platform
 - ~40 students/class (cap 50 in MVP)
 - All bubble MCQ; Letter one-page PDF
 - Prototype: web camera/upload, not native app; not LMS
@@ -29,8 +29,8 @@ Same 10 stems, different numbers and different A–D mappings per student — so
 ## Premises
 
 1. Core pain is reusable Instagram answers, not perfect anti-cheat.
-2. Mark can use a structured bank table for MVP.
-3. Success = Mark completes upload → print → photo → CSV and gives feedback; not official-grade auto CV.
+2. The instructor can use a structured bank table for MVP.
+3. Success = the instructor completes upload → print → photo → CSV and gives feedback; not official-grade auto CV.
 4. Need end-to-end web generation + grade UX; desktop-only OMR tools alone are insufficient.
 5. Private link OK for trial; harden auth before real graded use.
 
@@ -42,11 +42,11 @@ One deployable web app: roster + bank CSV → per-student Letter PDF + stored an
 
 ### Approach B: Ideal architecture — rejected
 
-Full auth, sessions, server OMR queue, audit — too slow for mentor review link.
+Full auth, sessions, server OMR queue, audit — too slow for a review link.
 
 ### Approach C: Generate-first, grade later — rejected
 
-Fastest print path but conflicts with Mark’s phone-scan grading ask for the prototype story. (MVP still sequences **generate first**, then grade UI; auto-OMR is not a blocker for first demo.)
+Fastest print path but conflicts with the instructor’s phone-scan grading ask for the prototype story. (MVP still sequences **generate first**, then grade UI; auto-OMR is not a blocker for first demo.)
 
 ## Recommended Approach
 
@@ -57,12 +57,12 @@ Fastest print path but conflicts with Mark’s phone-scan grading ask for the pr
 1. Open private exam link (`/e/{token}`). **Every** read/write API requires that token (header or path); unknown token → 404.
 2. Upload `students.csv` and `bank.csv`. Validate before generate (see below). Failures show row-level errors; **no partial generate**.
 3. Click Generate → **ZIP of PDFs** (MVP delivery; browser print-all deferred). Each **personalized exam sheet**: name, id, QR(`exam_instance_id`), 10 rendered questions + A–D bubbles, four corner fiducial markers.
-4. After exam: Upload photo → read QR → open grade form prefilled if auto-estimate available, else empty → Mark confirms/edits → Save.
+4. After exam: Upload photo → read QR → open grade form prefilled if auto-estimate available, else empty → the instructor confirms/edits → Save.
 5. Download results CSV (schema below).
 
 ### Token / privacy
 
-- Token: 128-bit random; **store only SHA-256 hash** in D1; compare hash on each request. Raw token only in Mark’s URL.
+- Token: 128-bit random; **store only SHA-256 hash** in D1; compare hash on each request. Raw token only in the instructor’s URL.
 - `Referrer-Policy: no-referrer` on app; no third-party scripts/analytics on exam routes.
 - Never log raw token, roster, or answers.
 - MVP: support **revoke** (delete/invalidate hash → API 404).
@@ -89,7 +89,7 @@ question_id,stem_template,n1_min,n1_max,choice_a_template,choice_b_template,choi
 q_switch,"If customer switching cost is about {n1} months of revenue, which force usually strengthens?",1,6,Buyer power,Supplier power,Threat of substitutes only,None of the above,A
 ```
 
-Prefer items where sampled numbers personalize the stem but **do not flip** the keyed letter (matches Mark’s “only changing the numbers”).
+Prefer items where sampled numbers personalize the stem but **do not flip** the keyed letter (matches the instructor’s “only changing the numbers”).
 
 ### Bank file validation (before generate)
 
@@ -121,7 +121,7 @@ Prefer items where sampled numbers personalize the stem but **do not flip** the 
 
 ### Grading model (phased)
 
-**Phase G0 (required for demo):** QR identify → Mark selects A–D (or blank) per **printed** question → save.
+**Phase G0 (required for demo):** QR identify → the instructor selects A–D (or blank) per **printed** question → save.
 
 **Phase G1 (same MVP if time):** ink-ratio estimate from aligned sheet; low confidence / multi-fill / empty → leave blank and flag `needs_review`.
 
@@ -138,9 +138,9 @@ Columns:
 - `student_name`, `student_id`
 - `ans_<question_id>` for each bank id (canonical letter **after** map-back, or empty)
 - `score_correct`, `score_pct`, `status`
-- Optional: `printed_order` JSON omitted from Mark’s default export; power users can ignore
+- Optional: `printed_order` JSON omitted from the instructor’s default export; power users can ignore
 
-Default export matches Mark’s ask (name, id, answers-by-question) using stable question ids, not “position 1–10”.
+Default export matches the instructor’s ask (name, id, answers-by-question) using stable question ids, not “position 1–10”.
 
 ### Image / OMR notes (G1)
 
@@ -158,12 +158,12 @@ Default export matches Mark’s ask (name, id, answers-by-question) using stable
 
 ## Open Questions
 
-- Mark confirms (with review link): same-10+shuffle OK? structured CSV OK? Letter + phone web photo OK?
+- The instructor confirms (with review link): same-10+shuffle OK? structured CSV OK? Letter + phone web photo OK?
 - Representative SGMA item lengths fit one Letter page (validate with his sample bank early).
 
 ## Success Criteria
 
-- Mark generates a ≤40-student exam from sample or his bank+roster in one sitting; receives ZIP of PDFs.
+- The instructor generates a ≤40-student exam from sample or his bank+roster in one sitting; receives ZIP of PDFs.
 - Two sheets show different numbers/option orders for the same `question_id`.
 - He grades ≥3 sheets via QR + manual (or assisted) UI, including one messy photo path (`needs_review` / re-upload).
 - Downloads CSV with name, id, per-`question_id` answers, score.
@@ -172,7 +172,7 @@ Default export matches Mark’s ask (name, id, answers-by-question) using stable
 ## Distribution Plan
 
 - GitHub repo for code + fake sample CSVs.
-- Deploy Mark’s workspace to Cloudflare (unguessable token URL).
+- Deploy the instructor’s workspace to Cloudflare (unguessable token URL).
 - First deploy may be manual `wrangler`; add GitHub Actions after he has clicked through once.
 
 ## Next Steps
@@ -180,18 +180,18 @@ Default export matches Mark’s ask (name, id, answers-by-question) using stable
 1. Scaffold CF Pages/Workers + D1; token-gated `/e/{token}`.
 2. Bank/roster validation + generation + ZIP of Letter PDFs + fiducials/QR.
 3. Grade UI G0 (QR + manual); CSV export; then G1 estimate if time.
-4. Deploy; send Mark link + 3 confirms; watch one generate session.
+4. Deploy; send the instructor link + 3 confirms; watch one generate session.
 5. Iterate only on his review notes.
 
 ## The Assignment
 
-Send Mark the private prototype URL plus three yes/no confirms (same 10 + shuffle; structured bank; Letter + web photo). Sit with him once while he generates one exam — do not only email the link.
+Send the instructor the private prototype URL plus three yes/no confirms (same 10 + shuffle; structured bank; Letter + web photo). Sit with him once while he generates one exam — do not only email the link.
 
 ## What I noticed about how you think
 
-- You framed this as helping Mark’s pain (“bathroom Instagram”), not as an abstract anti-AI platform.
-- You treated instructor feedback as answers to your instructor questions — keeping provenance clear before building.
-- You repeatedly chose “ship a reviewable link over more questionnaires,” which matches mentor collaboration.
+- You framed this as helping the instructor’s pain (“bathroom Instagram”), not as an abstract anti-AI platform.
+- You treated the instructor Q&A as requirements provenance — keeping provenance clear before building.
+- You repeatedly chose “ship a reviewable link over more questionnaires,” which matches collaborative review.
 - You accepted a narrow MVP (same 10, numbers only, manual review) instead of boiling the OMR ocean.
 
 ## Reviewer Concerns

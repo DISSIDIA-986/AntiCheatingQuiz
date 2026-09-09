@@ -805,7 +805,7 @@ code{background:#fff;padding:0.1rem 0.3rem}
 </body></html>`;
 }
 
-/** Plain-language help for non-technical instructors . */
+/** Plain-language help for non-technical instructors. */
 export function helpHtml(opts: { backHref?: string } = {}): string {
   const back = opts.backHref
     ? `<p class="nav"><a href="${opts.backHref}">← Back to exam workspace</a></p>`

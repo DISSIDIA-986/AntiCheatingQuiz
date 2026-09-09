@@ -2,5 +2,20 @@ node_modules/
 .wrangler/
 dist/
 .dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
 *.log
 .DS_Store
+
+# Local / private notes (PII, mentor briefs, email drafts)
+req.md
+req*.md
+*-private.md
+.private/
+.context/
+docs/private/
+
+# Agent local state
+.agents/memory/
