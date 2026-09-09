@@ -1,10 +1,45 @@
 import { describe, expect, it } from "vitest";
 import { validateBankCsv, validateRosterCsv } from "../src/lib/bank";
-import { generateInstances } from "../src/lib/generate";
+import { generateInstances, type ExamInstanceMap } from "../src/lib/generate";
 import { buildCombinedExamPdf, buildExamPdf } from "../src/lib/pdf";
+import { orderInstancesByRoster } from "../src/lib/roster-order";
+import { formatSheetCode } from "../src/lib/sheet-code";
 import { PDFDocument } from "pdf-lib";
+import { inflateSync } from "node:zlib";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+
+/** Pull printable WinAnsi / hex strings out of a PDF for identity checks. */
+function extractPdfText(pdf: Uint8Array): string {
+  const parts: Buffer[] = [];
+  let i = 0;
+  const buf = Buffer.from(pdf);
+  while (true) {
+    const a = buf.indexOf(Buffer.from("stream"), i);
+    if (a < 0) break;
+    const b = buf.indexOf(Buffer.from("endstream"), a);
+    let raw = buf.subarray(a + 6, b);
+    if (raw[0] === 0x0d && raw[1] === 0x0a) raw = raw.subarray(2);
+    else if (raw[0] === 0x0a) raw = raw.subarray(1);
+    try {
+      parts.push(inflateSync(raw));
+    } catch {
+      parts.push(Buffer.from(raw));
+    }
+    i = b + 9;
+  }
+  const blob = Buffer.concat(parts).toString("latin1");
+  const out: string[] = [];
+  for (const m of blob.matchAll(/<([0-9A-Fa-f]+)>/g)) {
+    const hex = m[1]!;
+    let s = "";
+    for (let p = 0; p + 1 < hex.length; p += 2) {
+      s += String.fromCharCode(parseInt(hex.slice(p, p + 2), 16));
+    }
+    out.push(s);
+  }
+  return out.join("\n");
+}
 
 describe("pdf generation", () => {
   it("builds a Letter PDF for one student with 40 choice slots", async () => {
@@ -24,6 +59,10 @@ describe("pdf generation", () => {
     });
     expect(pdf.byteLength).toBeGreaterThan(1000);
     expect(String.fromCharCode(...pdf.slice(0, 4))).toBe("%PDF");
+    const text = extractPdfText(pdf);
+    expect(text).toContain("Name: Alex Rivera");
+    expect(text).toContain("Student ID: S1001");
+    expect(text).toContain(formatSheetCode(instances[0]!.instance_id));
   });
 
   it("builds PDFs for full sample roster", async () => {
@@ -49,8 +88,14 @@ describe("pdf generation", () => {
       student_id: `S${String(index + 1).padStart(3, "0")}`,
     }));
     const instances = generateInstances(bank.questions, students, "pdf-40", "gen-pdf-40");
+    // Shuffle map order to prove combine uses caller (roster) order, not insertion luck.
+    const shuffled = [...instances].reverse();
+    const ordered = orderInstancesByRoster(
+      students,
+      new Map(shuffled.map((instance) => [instance.student_id, instance])),
+    );
     const bytes = await buildCombinedExamPdf(
-      instances.map((instance) => ({
+      ordered.map((instance) => ({
         instance,
         options: { gradeUrl: `https://example.test/s/${instance.instance_id}` },
       })),
@@ -60,8 +105,27 @@ describe("pdf generation", () => {
     for (const page of document.getPages()) {
       expect(page.getSize()).toEqual({ width: 612, height: 792 });
     }
-    expect(instances.map((instance) => instance.student_id)).toEqual(students.map((student) => student.student_id));
-    expect(new Set(instances.map((instance) => instance.instance_id)).size).toBe(40);
+
+    // Spot-check first, middle, last page identity + sheet code (QR payload is drawn, not text).
+    const pageBytes = async (index: number) => {
+      const one = await PDFDocument.create();
+      const [copied] = await one.copyPages(document, [index]);
+      one.addPage(copied!);
+      return one.save();
+    };
+    for (const index of [0, 19, 39] as const) {
+      const text = extractPdfText(await pageBytes(index));
+      const student = students[index]!;
+      const instance = ordered[index]!;
+      expect(text).toContain(`Name: ${student.student_name}`);
+      expect(text).toContain(`Student ID: ${student.student_id}`);
+      expect(text).toContain(formatSheetCode(instance.instance_id));
+      expect(text).toContain("Scan to grade");
+    }
+    expect(ordered.map((instance) => instance.student_id)).toEqual(
+      students.map((student) => student.student_id),
+    );
+    expect(new Set(ordered.map((instance) => instance.instance_id)).size).toBe(40);
   });
 
   it("preserves supported Unicode in names, IDs, and question content", async () => {
@@ -79,6 +143,10 @@ describe("pdf generation", () => {
       { instance: instance!, options: { gradeUrl: `https://example.test/s/${instance!.instance_id}` } },
     ]);
     expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+    const text = extractPdfText(bytes);
+    expect(text).toContain("Zoë Álvarez");
+    expect(text).toContain("ÉLÈVE-42");
+    expect(text).toContain("café déjà vu");
   });
 
   it("rejects unsupported Unicode instead of silently corrupting student identity", async () => {
@@ -94,6 +162,17 @@ describe("pdf generation", () => {
     await expect(
       buildExamPdf(instance!, { gradeUrl: `https://example.test/s/${instance!.instance_id}` }),
     ).rejects.toThrow(/unsupported character U\+/);
+  });
+
+  it("rejects an empty combined sheet list", async () => {
+    await expect(buildCombinedExamPdf([])).rejects.toThrow(/zero student sheets/);
+  });
+});
+
+describe("roster order helper", () => {
+  it("fails when a roster student is missing a generated sheet", () => {
+    const map = new Map<string, ExamInstanceMap>();
+    expect(() => orderInstancesByRoster([{ student_id: "S1" }], map)).toThrow(/incomplete/);
   });
 });
 

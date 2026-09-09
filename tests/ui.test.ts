@@ -42,7 +42,7 @@ describe("desktop authoring UI", () => {
 
   it("keeps printing guidance available without dominating the main flow", () => {
     expect(html).toContain('<details class="print-guide">');
-    expect(html).toContain("Combined PDF — print the whole roster");
+    expect(html).toContain("Combined PDF — roster order, one page per student");
     expect(html).toContain("<summary>How to print</summary>");
   });
 

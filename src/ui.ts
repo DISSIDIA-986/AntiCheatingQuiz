@@ -179,9 +179,9 @@ export function examAppHtml(token: string): string {
       <button id="btnGen" disabled>Create exam sheets (download ZIP)</button>
       <div id="genMsg" class="msg" role="status" aria-live="polite" tabindex="-1"></div>
       <div id="sheetDownloads" class="downloads" hidden>
-        <strong>Print or download</strong>
-        <a href="/e/${token}/api/exam-sheets.pdf">Combined PDF — print the whole roster</a>
-        <span>Individual PDFs are in the ZIP downloaded during generation.</span>
+        <strong>Print the whole class in one step</strong>
+        <a href="/e/${token}/api/exam-sheets.pdf">Combined PDF — roster order, one page per student</a>
+        <span>ZIP with individual PDFs is still downloaded when you click Create (optional for reprints of one student).</span>
       </div>
       <details class="print-guide">
         <summary>How to print</summary>

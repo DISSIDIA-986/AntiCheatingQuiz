@@ -7,6 +7,7 @@ import { safeFilename, zipPdfs } from "./lib/zip";
 import { toCsv } from "./lib/csv";
 import { getTemplate, csvDownloadResponse } from "./lib/templates";
 import { extractSheetLookup, randomSheetCode, sheetGradePath } from "./lib/sheet-code";
+import { orderInstancesByRoster } from "./lib/roster-order";
 import { examAppHtml, homeHtml, helpHtml, sheetGradeHtml, instructorGateHtml } from "./ui";
 
 export type Env = {
@@ -280,13 +281,11 @@ e.get("/api/exam-sheets.pdf", async (c) => {
       .prepare("SELECT student_id, map_json FROM instances WHERE exam_id = ?")
       .bind(exam.id)
       .all<{ student_id: string; map_json: string }>();
-    const byStudentId = new Map(rows.results.map((row) => [row.student_id, row.map_json]));
+    const byStudentId = new Map(
+      rows.results.map((row) => [row.student_id, JSON.parse(row.map_json) as ExamInstanceMap]),
+    );
     const roster = JSON.parse(payload.roster_json) as Array<{ student_id: string }>;
-    const instances = roster.map((student) => {
-      const json = byStudentId.get(student.student_id);
-      if (!json) throw new Error("Generated sheet set is incomplete");
-      return JSON.parse(json) as ExamInstanceMap;
-    });
+    const instances = orderInstancesByRoster(roster, byStudentId);
     const origin = new URL(c.req.url).origin;
     const pdf = await buildCombinedExamPdf(
       instances.map((instance) => ({

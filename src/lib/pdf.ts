@@ -144,6 +144,9 @@ export async function buildExamPdf(
 export async function buildCombinedExamPdf(
   sheets: Array<{ instance: ExamInstanceMap; options: BuildPdfOptions }>,
 ): Promise<Uint8Array> {
+  if (sheets.length === 0) {
+    throw new Error("Cannot build a combined PDF with zero student sheets");
+  }
   const combined = await PDFDocument.create();
   for (const sheet of sheets) {
     const source = await PDFDocument.load(await buildExamPdf(sheet.instance, sheet.options));
